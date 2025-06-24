@@ -1,0 +1,60 @@
+{
+	"users" : [
+		{
+			"name" : "admin",
+			"password" : "2d1e4f91dae49cd08eaba2293e422273",
+			"fullname" : "Miss. Super user",
+			"rights" : "admin",
+			"remotes" : [
+				"+127.0.0.0/24",
+				"+192.168.0.0/16"
+			],
+			"events" : "",
+			"filter" : "",
+			"mask" : "",
+			"note" : "A normal user. username='admin' password='secret'"
+		},
+		{
+			"name" : "user",
+			"password" : "8c3088f1b27432344f14d82033749797",
+			"fullname" : "Mr. Sample user",
+			"rights" : "user",
+			"remotes" : "",
+			"events" : "",
+			"filter" : "",
+			"mask" : "",
+			"note" : "A normal user. username='user' password='secret'"
+		},
+		{
+			"name" : "special1",
+			"password" : "52af526e3b91fbf9fe1f9447808b0902",
+			"fullname" : "Mrs. Special user",
+			"rights" : [
+				"user",
+				""
+			],
+			"remotes" : [
+				"+127.0.0.1",
+				"+fe80::/64"
+			],
+			"events" : [
+				"10:*",
+				"30:9"
+			],
+			"filter" : "",
+			"mask" : "",
+			"note" : "A normal user. username='special1' password='secret'"
+		},
+    {
+			"name" : "vscp",
+			"password" : "8c92432a556d8dc0b97e9c34fc79725e",
+			"fullname" : "VSCP standard user",
+			"rights" : "user",
+			"remotes" : "",
+			"events" : "",
+			"filter" : "",
+			"mask" : "",
+			"note" : "A normal user. username='vscp' password='secret'"
+		}
+	]
+}
