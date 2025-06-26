@@ -47,84 +47,11 @@ class tcpipClientObj;
 
 #define VSCP_TCPIP_COMMAND_LIST_MAX 200 // Max number of saved old commands
 
-#define VSCP_TCPIP_RV_OK    0
-#define VSCP_TCPIP_RV_ERROR -1
-#define VSCP_TCPIP_RV_CLOSE 99 // Connection should be closed.
+
 
 #define VSCP_TCP_MAX_CLIENTS 1024
 
-#define MSG_WELCOME       "Welcome to the VSCP tcp/ip server [l2drv].\r\n"
-#define MSG_OK            "+OK - Success.\r\n"
-#define MSG_GOODBY        "+OK - Connection closed by client.\r\n"
-#define MSG_GOODBY2       "+OK - Connection closed.\r\n"
-#define MSG_USENAME_OK    "+OK - User name accepted, password please\r\n"
-#define MSG_PASSWORD_OK   "+OK - Ready to work.\r\n"
-#define MSG_QUEUE_CLEARED "+OK - All events cleared.\r\n"
-#define MSG_RECEIVE_LOOP                                                       \
-    "+OK - Receive loop entered. QUITLOOP to terminate.\r\n"
-#define MSG_QUIT_LOOP "+OK - Quit receive loop.\r\n"
 
-#define MSG_ERROR           "-OK - Error\r\n"
-#define MSG_UNKNOWN_COMMAND "-OK - Unknown command\r\n"
-#define MSG_PARAMETER_ERROR "-OK - Invalid parameter or format\r\n"
-#define MSG_BUFFER_FULL     "-OK - Buffer Full\r\n"
-#define MSG_NO_MSG          "-OK - No event(s) available\r\n"
-
-#define MSG_PASSWORD_ERROR "-OK - Invalid username or password.\r\n"
-#define MSG_NOT_ACCREDITED "-OK - Need to log in to perform this command.\r\n"
-#define MSG_INVALID_USER   "-OK - Invalid user.\r\n"
-#define MSG_NEED_USERNAME                                                      \
-    "-OK - Need a Username before a password can be entered.\r\n"
-
-#define MSG_MAX_NUMBER_OF_CLIENTS "-OK - Max number of clients connected.\r\n"
-#define MSG_INTERNAL_ERROR        "-OK - Server Internal error.\r\n"
-#define MSG_INTERNAL_MEMORY_ERROR "-OK - Internal Memory error.\r\n"
-#define MSG_INVALID_REMOTE_ERROR  "-OK - Invalid or unknown peer.\r\n"
-
-#define MSG_LOW_PRIVILEGE_ERROR                                                \
-    "-OK - User need higher privilege level to perform this operation.\r\n"
-#define MSG_INTERFACE_NOT_FOUND  "-OK - Interface not found.\r\n"
-#define MSG_UNABLE_TO_SEND_EVENT "-OK - Unable to send event.\r\n"
-#define MSG_COMMAND_NOT_SUPPORTED "-OK - Command is not supported here.\r\n"
-
-#define MSG_VARIABLE_NOT_DEFINED "-OK - Variable is not defined.\r\n"
-#define MSG_VARIABLE_MUST_BE_EVENT_TYPE                                        \
-    "-OK - Variable must be of event type.\r\n"
-#define MSG_VARIABLE_NOT_STOCK                                                 \
-    "-OK - Operation does not work with stock variables.\r\n"
-#define MSG_VARIABLE_NO_SAVE     "-OK - Variable could not be saved.\r\n"
-#define MSG_VARIABLE_NOT_NUMERIC "-OK - Variable is not numeric.\r\n"
-#define MSG_VARIABLE_UNABLE_ADD  "-OK - Unable to add variable.\r\n"
-
-#define MSG_NO_TCPIP_ERROR "-OK - User does not have rights to use tcp/ip interface.\r\n"
-
-#define MSG_NO_RIGHTS_ERROR                                                \
-    "-OK - User does not have rights to perform this operation.\r\n"
-
-#define MSG_INTERFACE_NOT_FOUND "-OK - Interface not found.\r\n"
-
-#define MSG_VARIABLE_NOT_DEFINED "-OK - Variable is not defined.\r\n"
-#define MSG_MOT_ALLOWED_TO_SEND_EVENT                                          \
-    "-OK - Not allowed to sen this event (contact admin).\r\n"
-#define MSG_INVALID_PATH           "-OK - Invalid path.\r\n"
-#define MSG_FAILED_TO_GENERATE_SID "-OK - Failed to generate sid.\r\n"
-
-#define MSG_FAILED_TO_CREATE_TABLE                                             \
-    "-OK - Failed to create (one or more) table(s).\r\n"
-#define MSG_FAILED_TO_ADD_TABLE_TO_DB                                          \
-    "-OK - Failed to add table to database.\r\n"
-#define MSG_FAILED_TO_INIT_TABLE   "-OK - Failed to initialize table.\r\n"
-#define MSG_FAILED_GET_TABLE_NAMES "-OK - Failed to get table names.\r\n"
-#define MSG_FAILED_UNKNOWN_TABLE                                               \
-    "-OK - No table with that name can be found.\r\n"
-#define MSG_FAILED_TABLE_NAME_IN_USE                                           \
-    "-OK - This table name is already in use.\r\n"
-#define MSG_FAILED_TO_PREPARE_TABLE "-OK - Failed to prepare table search.\r\n"
-#define MSG_FAILED_TO_FINALIZE_TABLE                                           \
-    "-OK - Failed to finalize table search.\r\n"
-#define MSG_FAILED_TO_CLEAR_TABLE  "-OK - Failed to clear table.\r\n"
-#define MSG_FAILED_TO_WRITE_TABLE  "-OK - Failed to write data to table.\r\n"
-#define MSG_FAILED_TO_REMOVE_TABLE "-OK - Failed to remove table.\r\n"
 
 
 

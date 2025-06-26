@@ -209,17 +209,14 @@ set(RESOURCE_FILES
 # Add files to library
 add_library(vscpl2drv-websocksrv
   ./src/vscpl2drv-websocksrv.cpp
-  ./src/websocksrv.cpp
-  ./src/srv.cpp 
+  ./src/websocketsrv.cpp 
   ./third_party/vscp/src/vscp/common/userlist.h
   ./third_party/vscp/src/vscp/common/userlist.cpp
   ./third_party/vscp/src/vscp/common/clientlist.h
-  ./third_party/vscp/src/vscp/common/clientlist.cpp   
-  ./third_party/vscp/third_party/mustache/mustache.hpp
-  ./third_party/vscp/third_party/spdlog/include    
+  ./third_party/vscp/src/vscp/common/clientlist.cpp
+  ./third_party/Mustache/mustache.hpp
+  ./third_party/spdlog/include
   ./third_party/vscp/src/vscp/common/vscp.h
-  ./third_party/vscp/src/vscp/common/vscpremotetcpif.h
-  ./third_party/vscp/src/vscp/common/vscpremotetcpif.cpp
   ./third_party/vscp/src/vscp/common/vscpdatetime.h
   ./third_party/vscp/src/vscp/common/vscpdatetime.cpp
   ./third_party/vscp/src/vscp/common/guid.h
@@ -253,9 +250,9 @@ if (WIN32)
   include_directories( PUBLIC src/
     ./third_party/vscp/src/vscp/common/  
     ./third_party/vscp/src/common/
-    ./third_party/vscp/third_party/nlohmann/include
-    ./third_party/vscp/third_party/mustache/
-    ./third_party/vscp/third_party/spdlog/include/
+    ./third_party/nlohmann/include
+    ./third_party/Mustache/
+    ./third_party/spdlog/include/
     ${PThreads4W_INCLUDE_DIR}
     ${CMAKE_BINARY_DIR}
     ${OPENSSL_INCLUDE_DIR}
@@ -265,10 +262,10 @@ else()
   include_directories( PUBLIC src/
     ./third_party/vscp/src/vscp/common/
     ./third_party/vscp/src/common
-    ./third_party/vscp/third_party/nlohmann/include
-    ./third_party/vscp/third_party/mustache/
-    ./third_party/vscp/third_party/spdlog/include/
-    ./third_party/vscp/third_party/maddy/include/
+    ./third_party/nlohmann/include
+    ./third_party/Mustache/
+    ./third_party/spdlog/include/
+    ./third_party/maddy/include/
     ./third_party/crypto-algorithms/
     ${CMAKE_BINARY_DIR}
     ${OPENSSL_INCLUDE_DIR}
