@@ -87,8 +87,8 @@
       {
         "enable" : true,
         "name" : "tcpip-srv",
-        "path-driver" : "/home/akhe/development/VSCP/vscpl2drv-tcpipsrv/build/libvscpl2drv-tcpipsrv.so",
-        "path-config" : "/home/akhe/development/VSCP/vscpl2drv-tcpipsrv/debug/linux/tcpipsrv.json",
+        "path-driver" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/build/libvscpl2drv-websocksrv.so",
+        "path-config" : "/home/akhe/development/VSCP/vscpl2drv-websocksrvsrv/debug/linux/websocksrv.json",
         "guid" : "FF:FF:FF:FF:FF:FF:FF:F5:02:88:88:00:00:00:00:01",
 
         "mqtt": {
