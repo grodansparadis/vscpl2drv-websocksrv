@@ -33,8 +33,8 @@
 #include "StdAfx.h"
 #endif
 
-#include <string>
 #include <vector>
+#include <string>
 #include <ctime>
 #include <map>
 #include <list>
@@ -49,10 +49,7 @@
 #endif
 #include <time.h>
 
-#include <clientlist.h>
-// #include <clientitem.h>
 #include <userlist.h>
-// #include <useritem.h>
 #include <guid.h>
 
 #include <mongoose.h>
@@ -66,7 +63,8 @@
 // https://github.com/nlohmann/json
 using json = nlohmann::json;
 
-const uint16_t MAX_ITEMS_IN_QUEUE = 32000;
+const uint16_t MAX_ITEMS_IN_QUEUE                          = 32000;
+const uint32_t WEBSOCKETSRV_DEFAULT_INNER_RESPONSE_TIMEOUT = 5000;
 
 #define DRIVER_COPYRIGHT "Copyright © 2000-2025 Ake Hedman, the VSCP Project, https://www.vscp.org"
 
@@ -88,7 +86,11 @@ using json = nlohmann::json;
 #define WEBSOCKET_EXPIRE_TIME (2 * 60)
 
 // Authentication states
-enum { WEBSOCK_CONN_STATE_NULL = 0, WEBSOCK_CONN_STATE_CONNECTED, WEBSOCK_CONN_STATE_DATA };
+enum {
+  WEBSOCK_CONN_STATE_NULL = 0,  // Not connected
+  WEBSOCK_CONN_STATE_CONNECTED, // Connected
+  WEBSOCK_CONN_STATE_DATA
+}; // Data transfer
 
 enum {
   WEBSOCK_ERROR_NO_ERROR                  = 0,  // Everything is OK.
@@ -96,8 +98,8 @@ enum {
   WEBSOCK_ERROR_UNKNOWN_COMMAND           = 2,  // Unknown command.
   WEBSOCK_ERROR_TX_BUFFER_FULL            = 3,  // Transmit buffer full.
   WEBSOCK_ERROR_MEMORY_ALLOCATION         = 4,  // Problem allocating memory.
-  WEBSOCK_ERROR_NOT_AUTHORIZED            = 5,  // Not authorized.
-  WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT = 6,  // Not authorized to send events.
+  WEBSOCK_ERROR_NOT_AUTHORISED            = 5,  // Not authorised.
+  WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT = 6,  // Not authorised to send events.
   WEBSOCK_ERROR_NOT_ALLOWED_TO_DO_THAT    = 7,  // Not allowed to do that.
   WEBSOCK_ERROR_PARSE_FORMAT              = 8,  // Parse error, invalid format.
   WEBSOCK_ERROR_UNKNOWN_TYPE              = 9,  // Unkown object type
@@ -109,7 +111,7 @@ enum {
 #define WEBSOCK_STR_ERROR_UNKNOWN_COMMAND           "Unknown command."
 #define WEBSOCK_STR_ERROR_TX_BUFFER_FULL            "Transmit buffer full."
 #define WEBSOCK_STR_ERROR_MEMORY_ALLOCATION         "Having problems to allocate memory."
-#define WEBSOCK_STR_ERROR_NOT_AUTHORIZED            "Not authorized."
+#define WEBSOCK_STR_ERROR_NOT_AUTHORISED            "Not authorised."
 #define WEBSOCK_STR_ERROR_NOT_ALLOWED_TO_SEND_EVENT "Not allowed to send event."
 #define WEBSOCK_STR_ERROR_NOT_ALLOWED_TO_DO_THAT    "Not allowed to do that (check privileges)"
 #define WEBSOCK_STR_ERROR_PARSE_FORMAT              "Parse error, invalid format."
@@ -141,13 +143,6 @@ public:
   ~CWebSockSession(void);
 
   /*!
-    @brief Initialize the websocket session
-    @param pClientItem Pointer to client item
-    @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
-  */
-  int init(CClientItem *pClientItem);
-
-  /*!
     @brief Start the websocket session
     @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
   */
@@ -159,74 +154,7 @@ public:
   */
   int stop(void);
 
-  // /*!
-  //   @brief Handle incoming data from the websocket connection
-  //   @param conn Pointer to the mongoose connection
-  //   @param bits Bits indicating the type of data
-  //   @param data Pointer to the data
-  //   @param len Length of the data
-  //   @param cbdata Callback data
-  //   @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
-  // */
-  // int ws1_dataHandler(struct mg_connection *conn, int bits, char *data, size_t len, void *cbdata);
-
-  // /*!
-  //   @brief Handle incoming data from the websocket connection
-  //   @param conn Pointer to the mongoose connection
-  //   @param bits Bits indicating the type of data
-  //   @param data Pointer to the data
-  //   @param len Length of the data
-  //   @param cbdata Callback data
-  //   @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
-  // */
-  // int ws1_message(struct mg_connection *conn, std::string &strWsPkt);
-
-  // /*!
-  //   @brief Handle incoming data from the websocket connection
-  //   @param conn Pointer to the mongoose connection
-  //   @param strCmd Command string
-  //   @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
-  // */
-  // int ws1_command(struct mg_connection *conn, std::string &strCmd);
-
-  // /*!
-  //   @brief Handle incoming data from the websocket connection
-  //   @param conn Pointer to the mongoose connection
-  //   @param bits Bits indicating the type of data
-  //   @param data Pointer to the data
-  //   @param len Length of the data
-  //   @param cbdata Callback data
-  //   @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
-  // */
-  // int ws2_dataHandler(struct mg_connection *conn, int bits, char *data, size_t len, void *cbdata);
-
-  // /*!
-  //     @brief Handle incoming data from the websocket connection
-  //     @param conn Pointer to the mongoose connection
-  //     @param strWsPkt Websocket packet string
-  //     @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
-  //   */
-  // int ws2_message(struct mg_connection *conn, std::string &strWsPkt);
-
-  // /*!
-  //   @brief Handle incoming command from the websocket connection
-  //   @param conn Pointer to the mongoose connection
-  //   @param strCmd Command string
-  //   @param jsonObj JSON object containing command arguments
-  //   @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
-  // */
-  // int ws2_command(struct mg_connection *conn, std::string &strCmd, json &jsonObj);
-
-  // /*!
-  //   @brief Handle incoming xcommand from the websocket connection
-  //   @param conn Pointer to the mongoose connection
-  //   @param strCmd Command string
-  //   @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
-  // */
-  // int ws2_xcommand(struct mg_connection *conn, std::string &strCmd);
-
-  // Fetch client item object
-  CClientItem *getClientItem(void) { return m_pClientItem; }
+  // * * * Getters/Setters
 
   /*!
     @brief Get the unique ID for this session
@@ -234,35 +162,107 @@ public:
   */
   const char *getWebsocketKey(void) { return m_key; }
 
+  // Getters/setters
+
   /*!
     @brief Get the session ID (SID) for this session
     @return Pointer to the session ID for this session
   */
   const char *getSid(void) { return m_sid; }
 
-  uint8_t getWsType(void) { return m_wstypes; }
-  void setWsType(uint8_t wstype) { m_wstypes = wstype; }
+  /*!
+   @brief Set the session ID (SID) for this session
+   @param pSid Null terminated string sid (max 32 characters)
+  */
+  void setSid(const char *pSid)
+  {
+    if (pSid) {
+      strncpy(m_sid, pSid, sizeof(m_sid));
+      m_sid[sizeof(m_sid) - 1] = 0;
+    }
+    else {
+      memset(m_sid, 0, sizeof(m_sid));
+    }
+  }
+
+  /*!
+   @brief Get the websocket key (WS_KEY) for this session
+   @return Pointer to the websocket key for this session
+  */
+  const char *getKey(void) { return m_key; }
+
+  /*!
+   @brief Set the websocket key (WS_KEY) for this session
+   @param pKey Null terminated string key (max 32 characters)
+  */
+  void setKey(const char *pKey)
+  {
+    if (pKey) {
+      strncpy(m_key, pKey, sizeof(m_key));
+      m_key[sizeof(m_key) - 1] = 0;
+    }
+    else {
+      memset(m_key, 0, sizeof(m_key));
+    }
+  }
+
+  int getVersion(void) { return m_version; }
+  void setVersion(int version) { m_version = version; }
+
+  uint8_t getWsType(void) { return m_wstype; }
+  void setWsType(uint8_t wstype) { m_wstype = wstype; }
 
   int getConnState(void) { return m_conn_state; }
   void setConnState(int state) { m_conn_state = state; }
-
-  // Get the client connection
-  struct mg_connection *getConn(void) { return m_conn; }
-  void setConn(struct mg_connection *conn) { m_conn = conn; }
 
   // Get last active time
   time_t getLastActiveTime(void) { return lastActiveTime; }
   void setLastActiveTime(time_t t) { lastActiveTime = t; }
 
+  std::string getConcatenatedString(void) { return m_strConcatenated; }
+  void clearConcatenatedString(void) { m_strConcatenated.clear(); }
+  void setConcatenatedString(const std::string &str) { m_strConcatenated = str; }
+  void addConcatenatedString(struct mg_str &msg)
+  {
+    if (msg.buf && msg.len > 0) {
+      m_strConcatenated.append(msg.buf, msg.len);
+    }
+  };
+
+  struct mg_connection *getConnection() { return m_conn; };
+  void setConnection(struct mg_connection *conn) { m_conn = conn; };
+
+  bool isOpen(void) { return m_bOpen; };
+  void setOpen(bool bOpen) { m_bOpen = bOpen; };
+
+  vscpEventFilter &getFilter(void) { return m_filter; };
+  void setFilter(const vscpEventFilter &filter) { m_filter = filter; };
+
+  cguid *getGuid() { return &m_guid; };
+  void setGuid(const cguid &guid) { m_guid = guid; };
+
+  CUserItem *getUserItem(void) { return &m_pUserItem; };
+  void setUserItem(const CUserItem &user) { m_pUserItem = user; };
+
+  bool isAuthenticated(void) { return m_bAuthenticated; };
+  void setAuthenticated(bool bAuthenticated) { m_bAuthenticated = bAuthenticated; };
+
+public:
+  // Input Queue (events to this client)
+  std::deque<vscpEvent *> m_inputQueue;
+
+  // Semaphore to signal that an event has been received
+  sem_t m_semInputQueue;
+
+  // Mutex handle that is used for sharing of the client object
+  pthread_mutex_t m_mutexInputQueue;
+
 private:
   // ws type (0 = not set, 1 = ws1, 2 = ws2)
-  uint8_t m_wstypes;
+  uint8_t m_wstype;
 
   // Connection state (see enums above)
   int m_conn_state;
-
-  // Client connection
-  struct mg_connection *m_conn;
 
   // Unique ID for this session.
   char m_key[33]; // Sec-WebSocket-Key
@@ -279,8 +279,37 @@ private:
   // Concatenated message receive
   std::string m_strConcatenated;
 
-  // Client structure for websocket
-  CClientItem *m_pClientItem;
+  // Client item
+
+  // Flag for open/closed channel
+  bool m_bOpen;
+
+  // Filter/mask for VSCP
+  vscpEventFilter m_filter;
+
+  /*!
+      Interface GUID
+
+      The GUID for a client have the following form MSB -> LSB
+
+      0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFD ip-address ip-address ip-address
+      ip-address Client-ID Client-ID 0 0
+
+      ip-address ver 4 interface IP address
+      Client-ID mapped id for this client
+
+      This is the default address and it can be changed by the client
+     application
+
+  */
+  cguid m_guid;
+
+  bool m_bAuthenticated; // True if authenticated
+
+  // User item
+  CUserItem m_pUserItem;
+
+  struct mg_connection *m_conn; // Mongoose connection
 };
 
 #define WS2_COMMAND                                                                                                    \
@@ -377,11 +406,6 @@ public:
     @param key_path Path to server key for TLS
     @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
   */
-  int init(std::string &url,
-           std::string &web_root,
-           std::string &ca_path,
-           std::string &cert_path,
-           std::string &key_path);
 
   /*!
     @brief Load configuration from file
@@ -411,15 +435,19 @@ public:
   */
   int stop(void);
 
+  /*!
+    @brief Restart websocket server
+    @param
+    @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
+  */
+  int restart(void);
+
   // Getters/setters for URL, web root, CA path, cert path and key path
   std::string getUrl(void) const { return m_url; }
   void setUrl(const std::string &url) { m_url = url; }
 
   std::string getWebRoot(void) const { return m_web_root; }
   void setWebRoot(const std::string &web_root) { m_web_root = web_root; }
-
-  std::string getCaPath(void) const { return m_ca_path; }
-  void setCaPath(const std::string &ca_path) { m_ca_path = ca_path; }
 
   std::string getCertPath(void) const { return m_cert_path; }
   void setCertPath(const std::string &cert_path) { m_cert_path = cert_path; }
@@ -451,12 +479,48 @@ public:
   int authentication(struct mg_connection *conn, std::string &strIV, std::string &strCrypto);
 
   /*!
+    @brief Add an event to the send queue
+    @param pEvent Pointer to the VSCP event
+    @return VSCP_ERROR_SUCCESS on success, otherwise VSCP error code.
+  */
+  // int addEvent2SendQueue(const vscpEvent *pEvent);
+
+  /*!
+    @brief Add an event to the receive queue
+    @param pEvent Pointer to the VSCP event
+    @return VSCP_ERROR_SUCCESS on success, otherwise VSCP error code.
+  */
+  int addEvent2ReceiveQueue(const vscpEvent *pEvent);
+
+  /*!
+    @brief Add an event ex to the receive queue
+    @param ex Reference to the VSCP event ex
+    @return VSCP_ERROR_SUCCESS on success, otherwise VSCP error code.
+  */
+  int addEvent2ReceiveQueue(vscpEventEx &ex);
+
+  /*!
+    @brief Send an event to a specific client
+    @param pClientItem Pointer to the client item
+    @param pEvent Pointer to the VSCP event
+    @return VSCP_ERROR_SUCCESS on success, otherwise VSCP error code.
+  */
+  int sendEventToClient(CWebSockSession *pSessionItem, const vscpEvent *pEvent);
+
+  /*!
+    @brief Send an event to all connected and authorised clients
+    @param pEvent Pointer to the VSCP event to send
+    @return VSCP_ERROR_SUCCESS on success, otherwise VSCP error code.
+  */
+  int sendEventAllClients(const vscpEvent *pEvent);
+
+  /*!
     @brief Send a VSCP event over the websocket connection
     @param conn Pointer to the mongoose connection
     @param pev Pointer to the VSCP event
     @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
   */
-  int sendEvent(struct mg_connection *conn, vscpEvent *pev);
+  // int sendEvent(struct mg_connection *conn, vscpEvent *pev);
 
   /*!
     @brief Send a VSCP event ex over the websocket connection
@@ -464,7 +528,7 @@ public:
     @param pev Pointer to the VSCP event
     @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
   */
-  int sendEvent(struct mg_connection *conn, vscpEventEx *pex);
+  // int sendEvent(struct mg_connection *conn, vscpEventEx *pex);
 
   /*!
     @brief Post an incoming event to the websocket connection
@@ -479,10 +543,56 @@ public:
   int websock_post_incomingEvents(void);
 
   /*!
-    @brief Send an event to all connected and authorized clients
+    @brief Send an event to all connected and authorised clients
     @param pEvent Pointer to the VSCP event to send
   */
-  void sendEventAllClients(const vscpEvent *pEvent);
+  // int sendEventAllClients(const vscpEvent *pEvent);
+
+  /*!
+    @brief Add a client to the client list
+    @param pClientItem Pointer to client item
+    @param id Unique id for the client
+    @return true on success, false on failure
+  */
+  // bool addClient(CClientItem *pClientItem, uint32_t id);
+
+  /*!
+    @brief Add a client to the client list
+    @param pClientItem Pointer to client item
+    @param guid GUID for the client
+    @return true on success, false on failure
+  */
+  // bool addClient(CClientItem *pClientItem, cguid &guid);
+
+  /*!
+    @brief Remove a client from the client list
+    @param pClientItem Pointer to client item
+  */
+  // void removeClient(CClientItem *pClientItem);
+
+  /*!
+    @brief Create a new websocket session
+    @param id Unique identifier for the websocket session
+    @param pws_version Pointer to websocket version string
+    @param ws_key Pointer to websocket key string
+    @return Pointer to the new websocket session
+  */
+  CWebSockSession *newSession(unsigned long id, const char *pws_version, const char *ws_key);
+
+  /*!
+    @brief Remove a websocket session
+    @param id Unique identifier for the websocket session
+    @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
+  */
+  int removeSession(unsigned long id);
+
+  /*!
+    @brief Get a websocket session by its unique ID
+    @param id Unique identifier for the websocket session
+    @return Pointer to the websocket session or NULL if not found
+  */
+  CWebSockSession * getSession(unsigned long id);
+
 
   /*!
         Generate a random session key from a string key
@@ -503,15 +613,20 @@ public:
   //////////////////////////////////////////////////////////////////////////////
 
   /*!
+    @brief Handle when the websocket connection is ready
+    @param conn Pointer to the mongoose connection
+    @param cbdata Callback data
+  */
+  void ws1_readyHandler(struct mg_connection *conn, void *cbdata);
+
+  /*!
     @brief Handle incoming data from the websocket connection
     @param conn Pointer to the mongoose connection
-    @param bits Bits indicating the type of data
-    @param data Pointer to the data
-    @param len Length of the data
+    @param wm Pointer to the websocket message
     @param cbdata Callback data
     @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
   */
-  int ws1_dataHandler(struct mg_connection *conn, int bits, char *data, size_t len, void *cbdata);
+  int ws1_dataHandler(struct mg_connection *conn, struct mg_ws_message *wm);
 
   /*!
       @brief Handle incoming data from the websocket connection
@@ -534,15 +649,35 @@ public:
   //////////////////////////////////////////////////////////////////////////////
 
   /*!
-    @brief Handle incoming data from the websocket connection
+    @brief Handle when the websocket connection is ready
     @param conn Pointer to the mongoose connection
-    @param bits Bits indicating the type of data
-    @param data Pointer to the data
-    @param len Length of the data
+    @param cbdata Callback data
+  */
+  void ws2_readyHandler(struct mg_connection *conn, void *cbdata);
+
+  /*!
+    @brief Handle when the websocket connection is closed
+    @param conn Pointer to the mongoose connection
     @param cbdata Callback data
     @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
   */
-  int ws2_dataHandler(struct mg_connection *conn, int bits, char *data, size_t len, void *cbdata);
+  // int ws2_connectHandler(const struct mg_connection *conn, void *cbdata);
+
+  /*!
+    @brief Handle when the websocket connection is closed
+    @param conn Pointer to the mongoose connection
+    @param cbdata Callback data
+  */
+  void ws2_closeHandler(const struct mg_connection *conn, void *cbdata);
+
+  /*!
+    @brief Handle incoming data from the websocket connection
+    @param conn Pointer to the mongoose connection
+    @param wm Pointer to the websocket message
+    @param cbdata Callback data
+    @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
+  */
+  int ws2_dataHandler(struct mg_connection *conn, struct mg_ws_message *wm);
 
   /*!
       @brief Handle incoming data from the websocket connection
@@ -578,7 +713,7 @@ public:
   // * * * Configuration
 
   /// Path to configuration file
-  std::string m_pathConfig;
+  std::string m_path;
 
   /// True if config is remote writable
   bool m_bWriteEnable;
@@ -588,6 +723,12 @@ public:
 
   /// Path to user data base (must be present)
   std::string m_pathUsers;
+
+  uint16_t m_maxClients; // Max clients
+  bool m_bEnableWS1;     // True to enable ws1
+  bool m_bEnableWS2;     // True to enable ws2
+  bool m_bEnableREST;    // True to enable REST
+  bool m_bEnableStatic;  // True to enable static web pages
 
   /*
     If true our own sent events will be received, if
@@ -603,20 +744,12 @@ public:
   uint32_t m_responseTimeout;
 
   /// Filters for input/output
-  vscpEventFilter m_filterIn;
-  vscpEventFilter m_filterOut;
+  vscpEventFilter m_rxfilter;
+  vscpEventFilter m_txfilter;
 
   /// TLS / SSL
-  std::string m_tls_certificate;
-  std::string m_tls_certificate_chain;
-  bool m_tls_verify_peer;
-  std::string m_tls_ca_path;
-  std::string m_tls_ca_file;
-  uint8_t m_tls_verify_depth;
-  bool m_tls_default_verify_paths;
-  std::string m_tls_cipher_list;
-  uint8_t m_tls_protocol_version;
-  bool m_tls_short_trust;
+  std::string m_tls_certificate_path;
+  std::string m_tls_private_key_path;
 
   /////////////////////////////////////////////////////////
   //                      Logging
@@ -635,11 +768,18 @@ public:
 
   // ------------------------------------------------------------------------
 
-  bool m_bQuit;                          // Flag to indicate if the server should quit
-  uint8_t m_guid[16];                    // Driver GUID
+  bool m_bQuit; // Flag to indicate if the server should quit
+  cguid m_guid; // Driver GUID
+
   sem_t m_semReceiveQueue;               // Semaphore for receive queue
   pthread_mutex_t m_mutexReceiveQueue;   // Mutex for receive queue
   std::list<vscpEvent *> m_receiveQueue; // Receive queue
+
+  sem_t m_semSendQueue;               // Semaphore for send queue
+  pthread_mutex_t m_mutexSendQueue;   // Mutex for send queue
+  std::list<vscpEvent *> m_sendQueue; // Send queue
+
+  pthread_t m_websockWorkerThread; // Worker thread for websocket server
 
   //**************************************************************************
   //                                USERS
@@ -651,18 +791,8 @@ public:
   // Mutex for users
   pthread_mutex_t m_mutex_UserList;
 
-  //**************************************************************************
-  //                                CLIENTS
-  //**************************************************************************
-
-  // The list with active clients. (protecting mutex in object)
-  CClientList m_clientList;
-
-  // Mutex for client queue
-  pthread_mutex_t m_mutex_clientList;
-
   // Queue
-  std::list<vscpEvent *> m_sendList;
+  // std::list<vscpEvent *> m_sendList;
   std::list<vscpEvent *> m_receiveList;
 
   // ------------------------------------------------------------------------
@@ -673,9 +803,6 @@ private:
 
   // Web root for the websocket server
   std::string m_web_root;
-
-  // TSL CA path for the websocket server
-  std::string m_ca_path;
 
   // TSL certificate path for the websocket server
   std::string m_cert_path;
@@ -689,7 +816,8 @@ private:
   pthread_mutex_t m_mutex_websocketSession;
 
   // List of active websocket sessions
-  std::list<CWebSockSession *> m_websocketSessions;
+  // std::list<CWebSockSession *> m_websocketSessions;
+  std::map<unsigned long, CWebSockSession *> m_websocketSessionMap; // Key is connection id
 
   struct mg_mgr m_mgr; // Mongoose event manager
 };

@@ -87,8 +87,8 @@ using json = nlohmann::json;
 using namespace kainjow::mustache;
 
 // Forward declaration
-void*
-tcpipListenThread(void* pData);
+void *
+tcpipListenThread(void *pData);
 
 //////////////////////////////////////////////////////////////////////
 // CTcpipSrv
@@ -162,7 +162,7 @@ CTcpipSrv::~CTcpipSrv()
 //
 
 bool
-CTcpipSrv::open(std::string& path, const uint8_t* pguid)
+CTcpipSrv::open(std::string &path, const uint8_t *pguid)
 {
   if (NULL == pguid) {
     return false;
@@ -174,53 +174,12 @@ CTcpipSrv::open(std::string& path, const uint8_t* pguid)
   // Save path to config file
   m_path = path;
 
-  // Init pool
-  // spdlog::init_thread_pool(8192, 1);
-
-  // // Flush log every five seconds
-  // spdlog::flush_every(std::chrono::seconds(5));
-
-  // auto console = spdlog::stdout_color_mt("console");
-  // // Start out with level=info. Config may change this
-  // console->set_level(spdlog::level::info);
-  // console->set_pattern("[vscp] [%^%l%$] %v");
-  // spdlog::set_default_logger(console);
-
   // Read configuration file
   if (!doLoadConfig(path)) {
     spdlog::error("Failed to load configuration file [{}]", path.c_str());
     spdlog::drop_all();
     return false;
   }
-
-  // // Set up logger
-  // if (m_path_to_log_file.length()) {
-  //   auto rotating_file_sink =
-  //     std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-  //       m_path_to_log_file.c_str(),
-  //       m_max_log_size,
-  //       m_max_log_files);
-  //   if (m_bEnableFileLog) {
-  //     rotating_file_sink->set_level(m_fileLogLevel);
-  //     rotating_file_sink->set_pattern(m_fileLogPattern);
-  //   }
-  //   else {
-  //     // If disabled set to off
-  //     rotating_file_sink->set_level(spdlog::level::off);
-  //   }
-
-  //   std::vector<spdlog::sink_ptr> sinks{ rotating_file_sink };
-  //   auto logger = std::make_shared<spdlog::async_logger>(
-  //     "logger",
-  //     sinks.begin(),
-  //     sinks.end(),
-  //     spdlog::thread_pool(),
-  //     spdlog::async_overflow_policy::block);
-  //   // The separate sub loggers will handle trace levels
-  //   logger->set_level(spdlog::level::trace);
-  //   spdlog::register_logger(logger);
-  //   spdlog::set_default_logger(logger);
-  // }
 
   spdlog::debug("---> Open");
 
@@ -264,7 +223,7 @@ CTcpipSrv::close(void)
 //
 
 bool
-CTcpipSrv::doLoadConfig(std::string& path)
+CTcpipSrv::doLoadConfig(std::string &path)
 {
   try {
     std::ifstream in(m_path, std::ifstream::in);
@@ -280,7 +239,7 @@ CTcpipSrv::doLoadConfig(std::string& path)
     try {
       m_bWriteEnable = m_j_config["write"].get<bool>();
     }
-    catch (const std::exception& ex) {
+    catch (const std::exception &ex) {
       spdlog::error("Failed to read 'write' Error='{}'", ex.what());
     }
     catch (...) {
@@ -288,8 +247,7 @@ CTcpipSrv::doLoadConfig(std::string& path)
     }
   }
   else {
-    spdlog::error(
-      "ReadConfig: Failed to read LOGGING 'write' Defaults will be used.");
+    spdlog::error("ReadConfig: Failed to read LOGGING 'write' Defaults will be used.");
   }
 
   // VSCP key file
@@ -303,8 +261,7 @@ CTcpipSrv::doLoadConfig(std::string& path)
   }
 
   // Receive own events
-  if (m_j_config.contains("receive-sent-events") &&
-      m_j_config["receive-sent-events"].is_boolean()) {
+  if (m_j_config.contains("receive-sent-events") && m_j_config["receive-sent-events"].is_boolean()) {
     m_bReceiveOwnEvents = m_j_config["receive-sent-events"].get<bool>();
     if (m_bReceiveOwnEvents) {
       spdlog::info("Our sent event will be received.");
@@ -315,6 +272,253 @@ CTcpipSrv::doLoadConfig(std::string& path)
   }
   else {
     spdlog::info("Our sent event will be received.");
+  }
+
+  // Filter
+  if (m_j_config.contains("filter") && m_j_config["filter"].is_object()) {
+
+    json j = m_j_config["filter"];
+
+    // IN filter
+    if (j.contains("in-filter")) {
+      try {
+        std::string str = j["in-filter"].get<std::string>();
+        vscp_readFilterFromString(&m_rxfilter, str.c_str());
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'in-filter' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'in-filter' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'in-filter' Defaults "
+                    "will be used.");
+    }
+
+    // IN mask
+    if (j.contains("in-mask")) {
+      try {
+        std::string str = j["in-mask"].get<std::string>();
+        vscp_readMaskFromString(&m_rxmask, str.c_str());
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'in-mask' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'in-mask' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'in-mask' Defaults will be used.");
+    }
+
+    // OUT filter
+    if (j.contains("out-filter")) {
+      try {
+        std::string str = j["in-filter"].get<std::string>();
+        vscp_readFilterFromString(&m_txfilter, str.c_str());
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'out-filter' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'out-filter' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'out-filter' Defaults will be used.");
+    }
+
+    // OUT mask
+    if (j.contains("out-mask")) {
+      try {
+        std::string str = j["out-mask"].get<std::string>();
+        vscp_readMaskFromString(&m_txmask, str.c_str());
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'out-mask' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'out-mask' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'out-mask' Defaults will be used.");
+    }
+  }
+
+  // TLS / SSL
+  if (m_j_config.contains("tls") && m_j_config["tls"].is_object()) {
+
+    json j = m_j_config["tls"];
+
+    // Certificate
+    if (j.contains("certificate")) {
+      try {
+        m_tls_certificate = j["certificate"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'certificate' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'certificate' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'certificate' Defaults will be used.");
+    }
+
+    // certificate chain
+    if (j.contains("certificate_chain")) {
+      try {
+        m_tls_certificate_chain = j["certificate_chain"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'certificate_chain' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'certificate_chain' due to "
+                      "unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'certificate_chain' Defaults "
+                    "will be used.");
+    }
+
+    // verify peer
+    if (j.contains("verify-peer")) {
+      try {
+        m_tls_verify_peer = j["verify-peer"].get<bool>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'verify-peer' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'verify-peer' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'verify-peer' Defaults will be used.");
+    }
+
+    // CA Path
+    if (j.contains("ca-path")) {
+      try {
+        m_tls_ca_file = j["ca-path"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'ca-path' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'ca-path' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: ReadConfig: Failed to read 'ca-path' Defaults "
+                    "will be used.");
+    }
+
+    // CA File
+    if (j.contains("ca-file")) {
+      try {
+        m_tls_ca_file = j["ca-file"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'ca-file' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'ca-file' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: ReadConfig: Failed to read 'ca-file' Defaults "
+                    "will be used.");
+    }
+
+    // Verify depth
+    if (j.contains("verify_depth")) {
+      try {
+        m_tls_verify_depth = j["verify_depth"].get<uint16_t>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'verify_depth' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'verify_depth' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'verify_depth' Defaults will be used.");
+    }
+
+    // Default verify paths
+    if (j.contains("default-verify-paths")) {
+      try {
+        m_tls_default_verify_paths = j["default-verify-paths"].get<bool>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'default-verify-paths' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig:Failed to read 'default-verify-paths' due to "
+                      "unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'default-verify-paths' "
+                    "Defaults will be used.");
+    }
+
+    // Cipher list
+    if (j.contains("cipher-list")) {
+      try {
+        m_tls_cipher_list = j["cipher-list"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'cipher-list' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig:Failed to read 'cipher-list' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'cipher-list' Defaults will be used.");
+    }
+
+    // Protocol version
+    if (j.contains("protocol-version")) {
+      try {
+        m_tls_protocol_version = j["protocol-version"].get<uint16_t>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'protocol-version' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig:Failed to read 'protocol-version' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'protocol-version' Defaults will be used.");
+    }
+
+    // Short trust
+    if (j.contains("short-trust")) {
+      try {
+        m_tls_short_trust = j["short-trust"].get<bool>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'short-trust' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig:Failed to read 'short-trust' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'short-trust' Defaults will be used.");
+    }
   }
 
   // Logging
@@ -328,10 +532,8 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         str = j["file-log-level"].get<std::string>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error(
-          "[vscpl2drv-tcpipsrv]Failed to read 'file-log-level' Error='{}'",
-          ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("[vscpl2drv-tcpipsrv]Failed to read 'file-log-level' Error='{}'", ex.what());
       }
       catch (...) {
         spdlog::error("[vscpl2drv-tcpipsrv]Failed to read 'file-log-level' due "
@@ -375,13 +577,11 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_fileLogPattern = j["file-pattern"].get<std::string>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig:Failed to read 'file-pattern' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'file-pattern' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig:Failed to read 'file-pattern' due to unknown error.");
+        spdlog::error("ReadConfig:Failed to read 'file-pattern' due to unknown error.");
       }
     }
     else {
@@ -394,12 +594,11 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_path_to_log_file = j["file-path"].get<std::string>();
       }
-      catch (const std::exception& ex) {
+      catch (const std::exception &ex) {
         spdlog::error("Failed to read 'file-path' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig:Failed to read 'file-path' due to unknown error.");
+        spdlog::error("ReadConfig:Failed to read 'file-path' due to unknown error.");
       }
     }
     else {
@@ -412,13 +611,11 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_max_log_size = j["file-max-size"].get<uint32_t>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig:Failed to read 'file-max-size' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'file-max-size' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig:Failed to read 'file-max-size' due to unknown error.");
+        spdlog::error("ReadConfig:Failed to read 'file-max-size' due to unknown error.");
       }
     }
     else {
@@ -431,13 +628,11 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_max_log_files = j["file-max-files"].get<uint16_t>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig:Failed to read 'file-max-files' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'file-max-files' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig:Failed to read 'file-max-files' due to unknown error.");
+        spdlog::error("ReadConfig:Failed to read 'file-max-files' due to unknown error.");
       }
     }
     else {
@@ -469,10 +664,7 @@ CTcpipSrv::doLoadConfig(std::string& path)
   // std::make_shared<spdlog::sinks::rotating_file_sink_mt>("log_filename",
   // 1024*1024, 5, false);
   auto rotating_file_sink =
-    std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-      m_path_to_log_file.c_str(),
-      m_max_log_size,
-      m_max_log_files);
+    std::make_shared<spdlog::sinks::rotating_file_sink_mt>(m_path_to_log_file.c_str(), m_max_log_size, m_max_log_files);
 
   if (m_bEnableFileLog) {
     rotating_file_sink->set_level(m_fileLogLevel);
@@ -484,12 +676,11 @@ CTcpipSrv::doLoadConfig(std::string& path)
   }
 
   std::vector<spdlog::sink_ptr> sinks{ console_sink, rotating_file_sink };
-  auto logger = std::make_shared<spdlog::async_logger>(
-    "logger",
-    sinks.begin(),
-    sinks.end(),
-    spdlog::thread_pool(),
-    spdlog::async_overflow_policy::block);
+  auto logger = std::make_shared<spdlog::async_logger>("logger",
+                                                       sinks.begin(),
+                                                       sinks.end(),
+                                                       spdlog::thread_pool(),
+                                                       spdlog::async_overflow_policy::block);
   // The separate sub loggers will handle trace levels
   logger->set_level(spdlog::level::trace);
   spdlog::register_logger(logger);
@@ -501,18 +692,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
     try {
       m_interface = m_j_config["interface"].get<std::string>();
     }
-    catch (const std::exception& ex) {
-      spdlog::error("ReadConfig: Failed to read 'interface' Error='{}'",
-                    ex.what());
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'interface' Error='{}'", ex.what());
     }
     catch (...) {
-      spdlog::error(
-        "ReadConfig: Failed to read 'interface' due to unknown error.");
+      spdlog::error("ReadConfig: Failed to read 'interface' due to unknown error.");
     }
   }
   else {
-    spdlog::warn(
-      "ReadConfig: Failed to read 'interface' Defaults will be used.");
+    spdlog::warn("ReadConfig: Failed to read 'interface' Defaults will be used.");
   }
 
   // Path to user database
@@ -526,18 +714,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
         return false;
       }
     }
-    catch (const std::exception& ex) {
-      spdlog::error("ReadConfig: Failed to read 'path-users' Error='{}'",
-                    ex.what());
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'path-users' Error='{}'", ex.what());
     }
     catch (...) {
-      spdlog::error(
-        "ReadConfig: Failed to read 'path-users' due to unknown error.");
+      spdlog::error("ReadConfig: Failed to read 'path-users' due to unknown error.");
     }
   }
   else {
-    spdlog::warn(
-      "ReadConfig: Failed to read 'path-users' Defaults will be used.");
+    spdlog::warn("ReadConfig: Failed to read 'path-users' Defaults will be used.");
   }
 
   // Response timeout m_responseTimeout
@@ -545,18 +730,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
     try {
       m_responseTimeout = m_j_config["response-timeout"].get<uint32_t>();
     }
-    catch (const std::exception& ex) {
-      spdlog::error("ReadConfig: Failed to read 'response-timeout' Error='{}'",
-                    ex.what());
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'response-timeout' Error='{}'", ex.what());
     }
     catch (...) {
-      spdlog::error(
-        "ReadConfig: Failed to read 'response-timeout' due to unknown error.");
+      spdlog::error("ReadConfig: Failed to read 'response-timeout' due to unknown error.");
     }
   }
   else {
-    spdlog::warn(
-      "ReadConfig: Failed to read 'response-timeout' Defaults will be used.");
+    spdlog::warn("ReadConfig: Failed to read 'response-timeout' Defaults will be used.");
   }
 
   // Filter
@@ -570,13 +752,11 @@ CTcpipSrv::doLoadConfig(std::string& path)
         std::string str = j["in-filter"].get<std::string>();
         vscp_readFilterFromString(&m_filterIn, str.c_str());
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig: Failed to read 'in-filter' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'in-filter' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig: Failed to read 'in-filter' due to unknown error.");
+        spdlog::error("ReadConfig: Failed to read 'in-filter' due to unknown error.");
       }
     }
     else {
@@ -590,18 +770,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
         std::string str = j["in-mask"].get<std::string>();
         vscp_readMaskFromString(&m_filterIn, str.c_str());
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig: Failed to read 'in-mask' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'in-mask' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig: Failed to read 'in-mask' due to unknown error.");
+        spdlog::error("ReadConfig: Failed to read 'in-mask' due to unknown error.");
       }
     }
     else {
-      spdlog::debug(
-        "ReadConfig: Failed to read 'in-mask' Defaults will be used.");
+      spdlog::debug("ReadConfig: Failed to read 'in-mask' Defaults will be used.");
     }
 
     // OUT filter
@@ -610,18 +787,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
         std::string str = j["in-filter"].get<std::string>();
         vscp_readFilterFromString(&m_filterOut, str.c_str());
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig: Failed to read 'out-filter' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'out-filter' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig: Failed to read 'out-filter' due to unknown error.");
+        spdlog::error("ReadConfig: Failed to read 'out-filter' due to unknown error.");
       }
     }
     else {
-      spdlog::debug(
-        "ReadConfig: Failed to read 'out-filter' Defaults will be used.");
+      spdlog::debug("ReadConfig: Failed to read 'out-filter' Defaults will be used.");
     }
 
     // OUT mask
@@ -630,18 +804,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
         std::string str = j["out-mask"].get<std::string>();
         vscp_readMaskFromString(&m_filterOut, str.c_str());
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig: Failed to read 'out-mask' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'out-mask' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig: Failed to read 'out-mask' due to unknown error.");
+        spdlog::error("ReadConfig: Failed to read 'out-mask' due to unknown error.");
       }
     }
     else {
-      spdlog::debug(
-        "ReadConfig: Failed to read 'out-mask' Defaults will be used.");
+      spdlog::debug("ReadConfig: Failed to read 'out-mask' Defaults will be used.");
     }
   }
 
@@ -655,18 +826,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_tls_certificate = j["certificate"].get<std::string>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig: Failed to read 'certificate' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'certificate' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig: Failed to read 'certificate' due to unknown error.");
+        spdlog::error("ReadConfig: Failed to read 'certificate' due to unknown error.");
       }
     }
     else {
-      spdlog::debug(
-        "ReadConfig: Failed to read 'certificate' Defaults will be used.");
+      spdlog::debug("ReadConfig: Failed to read 'certificate' Defaults will be used.");
     }
 
     // certificate chain
@@ -674,10 +842,8 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_tls_certificate_chain = j["certificate_chain"].get<std::string>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error(
-          "ReadConfig: Failed to read 'certificate_chain' Error='{}'",
-          ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'certificate_chain' Error='{}'", ex.what());
       }
       catch (...) {
         spdlog::error("ReadConfig: Failed to read 'certificate_chain' due to "
@@ -694,18 +860,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_tls_verify_peer = j["verify-peer"].get<bool>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig: Failed to read 'verify-peer' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'verify-peer' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig: Failed to read 'verify-peer' due to unknown error.");
+        spdlog::error("ReadConfig: Failed to read 'verify-peer' due to unknown error.");
       }
     }
     else {
-      spdlog::debug(
-        "ReadConfig: Failed to read 'verify-peer' Defaults will be used.");
+      spdlog::debug("ReadConfig: Failed to read 'verify-peer' Defaults will be used.");
     }
 
     // CA Path
@@ -713,13 +876,11 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_tls_ca_file = j["ca-path"].get<std::string>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig: Failed to read 'ca-path' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'ca-path' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig: Failed to read 'ca-path' due to unknown error.");
+        spdlog::error("ReadConfig: Failed to read 'ca-path' due to unknown error.");
       }
     }
     else {
@@ -732,13 +893,11 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_tls_ca_file = j["ca-file"].get<std::string>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig: Failed to read 'ca-file' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'ca-file' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig: Failed to read 'ca-file' due to unknown error.");
+        spdlog::error("ReadConfig: Failed to read 'ca-file' due to unknown error.");
       }
     }
     else {
@@ -751,18 +910,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_tls_verify_depth = j["verify_depth"].get<uint16_t>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig: Failed to read 'verify_depth' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'verify_depth' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig: Failed to read 'verify_depth' due to unknown error.");
+        spdlog::error("ReadConfig: Failed to read 'verify_depth' due to unknown error.");
       }
     }
     else {
-      spdlog::debug(
-        "ReadConfig: Failed to read 'verify_depth' Defaults will be used.");
+      spdlog::debug("ReadConfig: Failed to read 'verify_depth' Defaults will be used.");
     }
 
     // Default verify paths
@@ -770,10 +926,8 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_tls_default_verify_paths = j["default-verify-paths"].get<bool>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error(
-          "ReadConfig:Failed to read 'default-verify-paths' Error='{}'",
-          ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'default-verify-paths' Error='{}'", ex.what());
       }
       catch (...) {
         spdlog::error("ReadConfig:Failed to read 'default-verify-paths' due to "
@@ -790,18 +944,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_tls_cipher_list = j["cipher-list"].get<std::string>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig:Failed to read 'cipher-list' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'cipher-list' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig:Failed to read 'cipher-list' due to unknown error.");
+        spdlog::error("ReadConfig:Failed to read 'cipher-list' due to unknown error.");
       }
     }
     else {
-      spdlog::debug(
-        "ReadConfig: Failed to read 'cipher-list' Defaults will be used.");
+      spdlog::debug("ReadConfig: Failed to read 'cipher-list' Defaults will be used.");
     }
 
     // Protocol version
@@ -809,18 +960,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_tls_protocol_version = j["protocol-version"].get<uint16_t>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig:Failed to read 'protocol-version' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'protocol-version' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig:Failed to read 'protocol-version' due to unknown error.");
+        spdlog::error("ReadConfig:Failed to read 'protocol-version' due to unknown error.");
       }
     }
     else {
-      spdlog::debug(
-        "ReadConfig: Failed to read 'protocol-version' Defaults will be used.");
+      spdlog::debug("ReadConfig: Failed to read 'protocol-version' Defaults will be used.");
     }
 
     // Short trust
@@ -828,18 +976,15 @@ CTcpipSrv::doLoadConfig(std::string& path)
       try {
         m_tls_short_trust = j["short-trust"].get<bool>();
       }
-      catch (const std::exception& ex) {
-        spdlog::error("ReadConfig:Failed to read 'short-trust' Error='{}'",
-                      ex.what());
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'short-trust' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error(
-          "ReadConfig:Failed to read 'short-trust' due to unknown error.");
+        spdlog::error("ReadConfig:Failed to read 'short-trust' due to unknown error.");
       }
     }
     else {
-      spdlog::debug(
-        "ReadConfig: Failed to read 'short-trust' Defaults will be used.");
+      spdlog::debug("ReadConfig: Failed to read 'short-trust' Defaults will be used.");
     }
   }
 
@@ -893,8 +1038,7 @@ CTcpipSrv::doLoadConfig(std::string& path)
 bool
 CTcpipSrv::doSaveConfig(void)
 {
-  if (m_j_config.value("write", false)) {
-  }
+  if (m_j_config.value("write", false)) {}
   return true;
 }
 
@@ -903,7 +1047,7 @@ CTcpipSrv::doSaveConfig(void)
 //
 
 bool
-CTcpipSrv::handleHLO(vscpEvent* pEvent)
+CTcpipSrv::handleHLO(vscpEvent *pEvent)
 {
   vscpEventEx ex;
 
@@ -924,8 +1068,7 @@ CTcpipSrv::handleHLO(vscpEvent* pEvent)
   // }
 
   // Must be HLO command event
-  if ((pEvent->vscp_class != VSCP_CLASS2_HLO) &&
-      (pEvent->vscp_type != VSCP2_TYPE_HLO_COMMAND)) {
+  if ((pEvent->vscp_class != VSCP_CLASS2_HLO) && (pEvent->vscp_type != VSCP2_TYPE_HLO_COMMAND)) {
     return false;
   }
 
@@ -983,7 +1126,7 @@ CTcpipSrv::handleHLO(vscpEvent* pEvent)
     j_response["description"] = "NOOP commaned executed correctly.";
 
     memset(ex.data, 0, sizeof(ex.data));
-    ex.sizeData = (uint16_t)strlen(buf);
+    ex.sizeData = (uint16_t) strlen(buf);
     memcpy(ex.data, buf, ex.sizeData);
   }
   else if (j.value("op", "") == "readvar") {
@@ -1021,7 +1164,7 @@ CTcpipSrv::handleHLO(vscpEvent* pEvent)
 //
 
 bool
-CTcpipSrv::readVariable(vscpEventEx& ex, const json& json_req)
+CTcpipSrv::readVariable(vscpEventEx &ex, const json &json_req)
 {
   json j;
 
@@ -1042,9 +1185,8 @@ CTcpipSrv::readVariable(vscpEventEx& ex, const json& json_req)
     j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("interface", ""));
   }
   else if ("vscp-key-file" == j.value("name", "")) {
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("vscp-key-file", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("vscp-key-file", ""));
   }
   else if ("max-out-queue" == j.value("name", "")) {
     j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_INTEGER;
@@ -1055,43 +1197,36 @@ CTcpipSrv::readVariable(vscpEventEx& ex, const json& json_req)
     j["arg"]["value"] = m_j_config.value("max-in-queue", 0);
   }
   else if ("encryption" == j.value("name", "")) {
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("encryption", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("encryption", ""));
   }
   else if ("ssl-certificate" == j.value("name", "")) {
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-certificate", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-certificate", ""));
   }
   else if ("ssl-certificate-chain" == j.value("name", "")) {
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-certificate-chain", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-certificate-chain", ""));
   }
   else if ("ssl-ca-path" == j.value("name", "")) {
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-ca-path", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-ca-path", ""));
   }
   else if ("ssl-ca-file" == j.value("name", "")) {
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-ca-file", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-ca-file", ""));
   }
   else if ("ssl-verify-depth" == j.value("name", "")) {
     j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_INTEGER;
     j["arg"]["value"] = m_j_config.value("ssl-verify-depth", 9);
   }
   else if ("ssl-default-verify-paths" == j.value("name", "")) {
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-default-verify-paths", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-default-verify-paths", ""));
   }
   else if ("ssl-cipher-list" == j.value("name", "")) {
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-cipher-list", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-cipher-list", ""));
   }
   else if ("ssl-protocol-version" == j.value("name", "")) {
     j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_INTEGER;
@@ -1133,7 +1268,7 @@ CTcpipSrv::readVariable(vscpEventEx& ex, const json& json_req)
 abort:
 
   memset(ex.data, 0, sizeof(ex.data));
-  ex.sizeData = (uint16_t)j.dump().length();
+  ex.sizeData = (uint16_t) j.dump().length();
   memcpy(ex.data, j.dump().c_str(), ex.sizeData);
 
   return true;
@@ -1144,7 +1279,7 @@ abort:
 //
 
 bool
-CTcpipSrv::writeVariable(vscpEventEx& ex, const json& json_req)
+CTcpipSrv::writeVariable(vscpEventEx &ex, const json &json_req)
 {
   json j;
 
@@ -1206,9 +1341,8 @@ CTcpipSrv::writeVariable(vscpEventEx& ex, const json& json_req)
     m_j_config["vscp-key-file"] = j["arg"].get<std::string>();
 
     // report back
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("vscp-key-file", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("vscp-key-file", ""));
   }
   else if ("max-out-queue" == j.value("name", "")) {
 
@@ -1249,9 +1383,8 @@ CTcpipSrv::writeVariable(vscpEventEx& ex, const json& json_req)
     m_j_config["encryption"] = j["arg"].get<std::string>();
 
     // report back
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("encryption", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("encryption", ""));
   }
   else if ("ssl-certificate" == j.value("name", "")) {
 
@@ -1264,9 +1397,8 @@ CTcpipSrv::writeVariable(vscpEventEx& ex, const json& json_req)
     m_j_config["ssl-certificate"] = j["arg"].get<std::string>();
 
     // report back
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-certificate", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-certificate", ""));
   }
   else if ("ssl-certificate-chain" == j.value("name", "")) {
 
@@ -1279,9 +1411,8 @@ CTcpipSrv::writeVariable(vscpEventEx& ex, const json& json_req)
     m_j_config["ssl-certificate-chain"] = j["arg"].get<std::string>();
 
     // report back
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-certificate-chain", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-certificate-chain", ""));
   }
   else if ("ssl-ca-path" == j.value("name", "")) {
 
@@ -1294,9 +1425,8 @@ CTcpipSrv::writeVariable(vscpEventEx& ex, const json& json_req)
     m_j_config["ssl-ca-path"] = j["arg"].get<std::string>();
 
     // report back
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-ca-path", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-ca-path", ""));
   }
   else if ("ssl-ca-file" == j.value("name", "")) {
 
@@ -1309,9 +1439,8 @@ CTcpipSrv::writeVariable(vscpEventEx& ex, const json& json_req)
     m_j_config["ssl-ca-file"] = j["arg"].get<std::string>();
 
     // report back
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-ca-file", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-ca-file", ""));
   }
   else if ("ssl-verify-depth" == j.value("name", "")) {
     j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_INTEGER;
@@ -1328,9 +1457,8 @@ CTcpipSrv::writeVariable(vscpEventEx& ex, const json& json_req)
     m_j_config["ssl-default-verify-paths"] = j["arg"].get<std::string>();
 
     // report back
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-default-verify-paths", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-default-verify-paths", ""));
   }
   else if ("ssl-cipher-list" == j.value("name", "")) {
 
@@ -1343,9 +1471,8 @@ CTcpipSrv::writeVariable(vscpEventEx& ex, const json& json_req)
     m_j_config["ssl-cipher-list"] = j["arg"].get<std::string>();
 
     // report back
-    j["arg"]["type"] = VSCP_REMOTE_VARIABLE_CODE_STRING;
-    j["arg"]["value"] =
-      vscp_convertToBase64(m_j_config.value("ssl-cipher-list", ""));
+    j["arg"]["type"]  = VSCP_REMOTE_VARIABLE_CODE_STRING;
+    j["arg"]["value"] = vscp_convertToBase64(m_j_config.value("ssl-cipher-list", ""));
   }
   else if ("ssl-protocol-version" == j.value("name", "")) {
 
@@ -1413,7 +1540,7 @@ CTcpipSrv::writeVariable(vscpEventEx& ex, const json& json_req)
 abort:
 
   memset(ex.data, 0, sizeof(ex.data));
-  ex.sizeData = (uint16_t)j.dump().length();
+  ex.sizeData = (uint16_t) j.dump().length();
   memcpy(ex.data, j.dump().c_str(), ex.sizeData);
 
   return true;
@@ -1424,7 +1551,7 @@ abort:
 //
 
 bool
-CTcpipSrv::deleteVariable(vscpEventEx& ex, const json& json_reg)
+CTcpipSrv::deleteVariable(vscpEventEx &ex, const json &json_reg)
 {
   json j;
 
@@ -1451,8 +1578,7 @@ CTcpipSrv::deleteVariable(vscpEventEx& ex, const json& json_reg)
     int index = j.value("index", 0); // get index
     if (index >= m_j_config["users"].size()) {
       // Index to large
-      spdlog::warn("index of array is to large [%u].",
-                   index >= m_j_config["users"].size());
+      spdlog::warn("index of array is to large [%u].", index >= m_j_config["users"].size());
       j["result"] = VSCP_ERROR_INDEX_OOB;
       goto abort;
     }
@@ -1467,19 +1593,9 @@ CTcpipSrv::deleteVariable(vscpEventEx& ex, const json& json_reg)
 abort:
 
   memset(ex.data, 0, sizeof(ex.data));
-  ex.sizeData = (uint16_t)j.dump().length();
+  ex.sizeData = (uint16_t) j.dump().length();
   memcpy(ex.data, j.dump().c_str(), ex.sizeData);
 
-  return true;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// stop
-//
-
-bool
-CTcpipSrv::stop(void)
-{
   return true;
 }
 
@@ -1489,6 +1605,16 @@ CTcpipSrv::stop(void)
 
 bool
 CTcpipSrv::start(void)
+{
+  return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// stop
+//
+
+bool
+CTcpipSrv::stop(void)
 {
   return true;
 }
@@ -1516,9 +1642,9 @@ CTcpipSrv::restart(void)
 //
 
 bool
-CTcpipSrv::eventExToReceiveQueue(vscpEventEx& ex)
+CTcpipSrv::eventExToReceiveQueue(vscpEventEx &ex)
 {
-  vscpEvent* pev = new vscpEvent();
+  vscpEvent *pev = new vscpEvent();
   if (!vscp_convertEventExToEvent(pev, &ex)) {
     spdlog::error("Failed to convert event from ex to ev.");
     vscp_deleteEvent(pev);
@@ -1548,10 +1674,10 @@ CTcpipSrv::eventExToReceiveQueue(vscpEventEx& ex)
 //
 
 bool
-CTcpipSrv::addEvent2SendQueue(const vscpEvent* pEvent)
+CTcpipSrv::addEvent2SendQueue(const vscpEvent *pEvent)
 {
   pthread_mutex_lock(&m_mutexSendQueue);
-  m_sendList.push_back((vscpEvent*)pEvent);
+  m_sendList.push_back((vscpEvent *) pEvent);
   sem_post(&m_semSendQueue);
   pthread_mutex_unlock(&m_mutexSendQueue);
   return true;
@@ -1564,10 +1690,10 @@ CTcpipSrv::addEvent2SendQueue(const vscpEvent* pEvent)
 //
 
 bool
-CTcpipSrv::addEvent2ReceiveQueue(const vscpEvent* pEvent)
+CTcpipSrv::addEvent2ReceiveQueue(const vscpEvent *pEvent)
 {
   pthread_mutex_lock(&m_mutexReceiveQueue);
-  m_receiveList.push_back((vscpEvent*)pEvent);
+  m_receiveList.push_back((vscpEvent *) pEvent);
   pthread_mutex_unlock(&m_mutexReceiveQueue);
   sem_post(&m_semReceiveQueue);
   return true;
@@ -1578,7 +1704,7 @@ CTcpipSrv::addEvent2ReceiveQueue(const vscpEvent* pEvent)
 //
 
 bool
-CTcpipSrv::sendEventToClient(CClientItem* pClientItem, const vscpEvent* pEvent)
+CTcpipSrv::sendEventToClient(CClientItem *pClientItem, const vscpEvent *pEvent)
 {
   // Must be valid pointers
   if (NULL == pClientItem) {
@@ -1600,8 +1726,7 @@ CTcpipSrv::sendEventToClient(CClientItem* pClientItem, const vscpEvent* pEvent)
 
   // If the client queue is full for this client then the
   // client will not receive the message
-  if (pClientItem->m_clientInputQueue.size() >
-      m_j_config.value("max-out-queue", MAX_ITEMS_IN_QUEUE)) {
+  if (pClientItem->m_clientInputQueue.size() > m_j_config.value("max-out-queue", MAX_ITEMS_IN_QUEUE)) {
     if (m_j_config.contains("debug") && m_j_config["debug"].get<bool>()) {
       spdlog::debug("sendEventToClient - overrun");
     }
@@ -1611,7 +1736,7 @@ CTcpipSrv::sendEventToClient(CClientItem* pClientItem, const vscpEvent* pEvent)
   }
 
   // Create a new event
-  vscpEvent* pnewvscpEvent = new vscpEvent;
+  vscpEvent *pnewvscpEvent = new vscpEvent;
   if (NULL != pnewvscpEvent) {
 
     // Copy in the new event
@@ -1635,10 +1760,10 @@ CTcpipSrv::sendEventToClient(CClientItem* pClientItem, const vscpEvent* pEvent)
 //
 
 bool
-CTcpipSrv::sendEventAllClients(const vscpEvent* pEvent)
+CTcpipSrv::sendEventAllClients(const vscpEvent *pEvent)
 {
-  CClientItem* pClientItem;
-  std::deque<CClientItem*>::iterator it;
+  CClientItem *pClientItem;
+  std::deque<CClientItem *>::iterator it;
 
   if (NULL == pEvent) {
     spdlog::error("sendEventAllClients - No event to send");
@@ -1646,15 +1771,12 @@ CTcpipSrv::sendEventAllClients(const vscpEvent* pEvent)
   }
 
   pthread_mutex_lock(&m_clientList.m_mutexItemList);
-  for (it = m_clientList.m_itemList.begin();
-       it != m_clientList.m_itemList.end();
-       ++it) {
+  for (it = m_clientList.m_itemList.begin(); it != m_clientList.m_itemList.end(); ++it) {
     pClientItem = *it;
 
     if (NULL != pClientItem) {
       if (m_j_config.contains("debug") && m_j_config["debug"].get<bool>()) {
-        spdlog::debug("Send event to client [%s]",
-                      pClientItem->m_strDeviceName.c_str());
+        spdlog::debug("Send event to client [%s]", pClientItem->m_strDeviceName.c_str());
       }
       if (!sendEventToClient(pClientItem, pEvent)) {
         spdlog::error("sendEventAllClients - Failed to send event");
@@ -1679,19 +1801,15 @@ CTcpipSrv::startTcpipSrvThread(void)
   }
 
   // Create the tcp/ip server data object
-  m_ptcpipSrvObject = (tcpipListenThreadObj*)new tcpipListenThreadObj(this);
+  m_ptcpipSrvObject = (tcpipListenThreadObj *) new tcpipListenThreadObj(this);
   if (NULL == m_ptcpipSrvObject) {
     spdlog::error("Controlobject: Failed to allocate storage for tcp/ip.");
   }
 
   // Set the port to listen for connections on
-  m_ptcpipSrvObject->setListeningPort(
-    m_j_config["interface"].get<std::string>());
+  m_ptcpipSrvObject->setListeningPort(m_j_config["interface"].get<std::string>());
 
-  if (pthread_create(&m_tcpipListenThread,
-                     NULL,
-                     tcpipListenThread,
-                     m_ptcpipSrvObject)) {
+  if (pthread_create(&m_tcpipListenThread, NULL, tcpipListenThread, m_ptcpipSrvObject)) {
     delete m_ptcpipSrvObject;
     m_ptcpipSrvObject = NULL;
     spdlog::error("Controlobject: Unable to start the tcp/ip listen thread.");
@@ -1731,7 +1849,7 @@ CTcpipSrv::stopTcpipSrvThread(void)
 //
 
 bool
-CTcpipSrv::addClient(CClientItem* pClientItem, uint32_t id)
+CTcpipSrv::addClient(CClientItem *pClientItem, uint32_t id)
 {
   // Check pointer
   if (NULL == pClientItem) {
@@ -1758,7 +1876,7 @@ CTcpipSrv::addClient(CClientItem* pClientItem, uint32_t id)
 //
 
 bool
-CTcpipSrv::addClient(CClientItem* pClientItem, cguid& guid)
+CTcpipSrv::addClient(CClientItem *pClientItem, cguid &guid)
 {
   // Check pointer
   if (NULL == pClientItem) {
@@ -1778,7 +1896,7 @@ CTcpipSrv::addClient(CClientItem* pClientItem, cguid& guid)
 //
 
 void
-CTcpipSrv::removeClient(CClientItem* pClientItem)
+CTcpipSrv::removeClient(CClientItem *pClientItem)
 {
   // Do not try to handle invalid clients
   if (NULL == pClientItem)
@@ -1793,7 +1911,7 @@ CTcpipSrv::removeClient(CClientItem* pClientItem)
 //
 
 bool
-CTcpipSrv::generateSessionId(const char* pKey, char* psid)
+CTcpipSrv::generateSessionId(const char *pKey, char *psid)
 {
   char buf[8193];
 
@@ -1813,14 +1931,14 @@ CTcpipSrv::generateSessionId(const char* pKey, char* psid)
            sizeof(buf),
            "__%s_%X%X%X%X_be_hungry_stay_foolish_%X%X",
            pKey,
-           (unsigned int)rand(),
-           (unsigned int)rand(),
-           (unsigned int)rand(),
-           (unsigned int)t,
-           (unsigned int)rand(),
+           (unsigned int) rand(),
+           (unsigned int) rand(),
+           (unsigned int) rand(),
+           (unsigned int) t,
+           (unsigned int) rand(),
            1337);
 
-  vscp_md5(psid, (const unsigned char*)buf, strlen(buf));
+  vscp_md5(psid, (const unsigned char *) buf, strlen(buf));
 
   return true;
 }
@@ -1830,7 +1948,7 @@ CTcpipSrv::generateSessionId(const char* pKey, char* psid)
 //
 
 bool
-CTcpipSrv::readEncryptionKey(const std::string& path)
+CTcpipSrv::readEncryptionKey(const std::string &path)
 {
   try {
     std::ifstream in(path, std::ifstream::in);

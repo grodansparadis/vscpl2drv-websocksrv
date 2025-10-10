@@ -22,7 +22,7 @@
 //
 
 #ifdef __GNUG__
-//#pragma implementation
+// #pragma implementation
 #endif
 
 #ifdef WIN32
@@ -43,6 +43,7 @@
 #include <vscphelper.h>
 #include <hlo.h>
 
+#include "version.h"
 #include "vscpl2drv-websocksrv.h"
 #include "websocksrv.h"
 
@@ -60,7 +61,7 @@ _fini() __attribute__((destructor));
 #endif
 
 // This map holds driver handles/objects
-static std::map<long, CWebSockSrv*> g_ifMap;
+static std::map<long, CWebSockSrv *> g_ifMap;
 
 // Mutex for the map object
 static pthread_mutex_t g_mapMutex;
@@ -72,7 +73,7 @@ static pthread_mutex_t g_mapMutex;
 void
 _init()
 {
-    pthread_mutex_init(&g_mapMutex, NULL);
+  pthread_mutex_init(&g_mapMutex, NULL);
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -82,31 +83,29 @@ _init()
 void
 _fini()
 {
-    // If empty - nothing to do
-    if (g_ifMap.empty())
-        return;
+  // If empty - nothing to do
+  if (g_ifMap.empty())
+    return;
 
-    // Remove orphan objects
-    LOCK_MUTEX(g_mapMutex);
+  // Remove orphan objects
+  LOCK_MUTEX(g_mapMutex);
 
-    for (std::map<long, CWebSockSrv*>::iterator it = g_ifMap.begin();
-         it != g_ifMap.end();
-         ++it) {
-        // std::cout << it->first << " => " << it->second << '\n';
+  for (std::map<long, CWebSockSrv *>::iterator it = g_ifMap.begin(); it != g_ifMap.end(); ++it) {
+    // std::cout << it->first << " => " << it->second << '\n';
 
-        CWebSockSrv* pif = it->second;
-        if (NULL != pif) {
-            //pif->m_srvRemoteSend.doCmdClose();
-            //pif->m_srvRemoteReceive.doCmdClose();
-            delete pif;
-            pif = NULL;
-        }
+    CWebSockSrv *pif = it->second;
+    if (NULL != pif) {
+      // pif->m_srvRemoteSend.doCmdClose();
+      // pif->m_srvRemoteReceive.doCmdClose();
+      delete pif;
+      pif = NULL;
     }
+  }
 
-    g_ifMap.clear();    // Remove all items
+  g_ifMap.clear(); // Remove all items
 
-    UNLOCK_MUTEX(g_mapMutex);
-    pthread_mutex_destroy(&g_mapMutex);
+  UNLOCK_MUTEX(g_mapMutex);
+  pthread_mutex_destroy(&g_mapMutex);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -114,49 +113,49 @@ _fini()
 //
 
 long
-addDriverObject(CWebSockSrv* pif)
+addDriverObject(CWebSockSrv *pif)
 {
-    std::map<long, CWebSockSrv*>::iterator it;
-    long h = 0;
+  std::map<long, CWebSockSrv *>::iterator it;
+  long h = 0;
 
-    LOCK_MUTEX(g_mapMutex);
+  LOCK_MUTEX(g_mapMutex);
 
-    // Find free handle
-    while (true) {
-        if (g_ifMap.end() == (it = g_ifMap.find(h)))
-            break;
-        h++;
-    }
+  // Find free handle
+  while (true) {
+    if (g_ifMap.end() == (it = g_ifMap.find(h)))
+      break;
+    h++;
+  }
 
-    g_ifMap[h] = pif;
-    h += 1681;
+  g_ifMap[h] = pif;
+  h += 1681;
 
-    UNLOCK_MUTEX(g_mapMutex);
+  UNLOCK_MUTEX(g_mapMutex);
 
-    return h;
+  return h;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // getDriverObject
 //
 
-CWebSockSrv*
+CWebSockSrv *
 getDriverObject(long h)
 {
-    std::map<long, CWebSockSrv*>::iterator it;
-    long idx = h - 1681;
+  std::map<long, CWebSockSrv *>::iterator it;
+  long idx = h - 1681;
 
-    // Check if valid handle
-    if (idx < 0) {
-        return NULL;
-    }
-
-    it = g_ifMap.find(idx);
-    if (it != g_ifMap.end()) {
-        return it->second;
-    }
-
+  // Check if valid handle
+  if (idx < 0) {
     return NULL;
+  }
+
+  it = g_ifMap.find(idx);
+  if (it != g_ifMap.end()) {
+    return it->second;
+  }
+
+  return NULL;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -166,25 +165,25 @@ getDriverObject(long h)
 void
 removeDriverObject(long h)
 {
-    std::map<long, CWebSockSrv*>::iterator it;
-    long idx = h - 1681;
+  std::map<long, CWebSockSrv *>::iterator it;
+  long idx = h - 1681;
 
-    // Check if valid handle
-    if (idx < 0) {
-        return;
-    }
+  // Check if valid handle
+  if (idx < 0) {
+    return;
+  }
 
-    LOCK_MUTEX(g_mapMutex);
-    it = g_ifMap.find(idx);
-    if (it != g_ifMap.end()) {
-        CWebSockSrv* pObj = it->second;
-        if (NULL != pObj) {
-            delete pObj;
-            pObj = NULL;
-        }
-        g_ifMap.erase(it);
+  LOCK_MUTEX(g_mapMutex);
+  it = g_ifMap.find(idx);
+  if (it != g_ifMap.end()) {
+    CWebSockSrv *pObj = it->second;
+    if (NULL != pObj) {
+      delete pObj;
+      pObj = NULL;
     }
-    UNLOCK_MUTEX(g_mapMutex);
+    g_ifMap.erase(it);
+  }
+  UNLOCK_MUTEX(g_mapMutex);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -196,27 +195,27 @@ removeDriverObject(long h)
 //
 
 extern "C" long
-VSCPOpen(const char* pPathConfig, const char* pguid)
+VSCPOpen(const char *pPathConfig, const char *pguid)
 {
-    long h = 0;
+  long h = 0;
 
-    CWebSockSrv* pdrvObj = new CWebSockSrv();
-    if (NULL != pdrvObj) {
+  CWebSockSrv *pdrvObj = new CWebSockSrv();
+  if (NULL != pdrvObj) {
 
-        //cguid guid(pguid);
-        std::string path = pPathConfig;
-        if (path.length() && pdrvObj->open(path, (const uint8_t *)pguid)) {
+    // cguid guid(pguid);
+    std::string path = pPathConfig;
+    if (path.length() && (VSCP_ERROR_SUCCESS == pdrvObj->open(path, (const uint8_t *) pguid))) {
 
-            if (!(h = addDriverObject(pdrvObj))) {
-                delete pdrvObj;
-            }
-
-        } else {
-            delete pdrvObj;
-        }
+      if (!(h = addDriverObject(pdrvObj))) {
+        delete pdrvObj;
+      }
     }
+    else {
+      delete pdrvObj;
+    }
+  }
 
-    return h;
+  return h;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -226,15 +225,15 @@ VSCPOpen(const char* pPathConfig, const char* pguid)
 extern "C" int
 VSCPClose(long handle)
 {
-    CWebSockSrv* pdrvObj = getDriverObject(handle);
-    if (NULL == pdrvObj) {
-        return 0;
-    }
+  CWebSockSrv *pdrvObj = getDriverObject(handle);
+  if (NULL == pdrvObj) {
+    return 0;
+  }
 
-    pdrvObj->close();
-    removeDriverObject(handle);
+  pdrvObj->close();
+  removeDriverObject(handle);
 
-    return CANAL_ERROR_SUCCESS;
+  return CANAL_ERROR_SUCCESS;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -242,17 +241,17 @@ VSCPClose(long handle)
 //
 
 extern "C" int
-VSCPWrite(long handle, const vscpEvent* pEvent, unsigned long timeout)
+VSCPWrite(long handle, const vscpEvent *pEvent, unsigned long timeout)
 {
-    CWebSockSrv* pdrvObj = getDriverObject(handle);
-    if (NULL == pdrvObj) {
-        return CANAL_ERROR_MEMORY;
-    }
+  CWebSockSrv *pdrvObj = getDriverObject(handle);
+  if (NULL == pdrvObj) {
+    return CANAL_ERROR_MEMORY;
+  }
 
-    //pdrvObj->addEvent2SendQueue(pEvent);
-    pdrvObj->sendEventAllClients(pEvent);
+  // pdrvObj->addEvent2SendQueue(pEvent);
+  pdrvObj->sendEventAllClients(pEvent);
 
-    return CANAL_ERROR_SUCCESS;
+  return CANAL_ERROR_SUCCESS;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -260,62 +259,58 @@ VSCPWrite(long handle, const vscpEvent* pEvent, unsigned long timeout)
 //
 
 extern "C" int
-VSCPRead(long handle, vscpEvent* pEvent, unsigned long timeout)
+VSCPRead(long handle, vscpEvent *pEvent, unsigned long timeout)
 {
-    int rv = 0;
+  int rv = 0;
 
-    // Check pointer
-    if (NULL == pEvent) {
-        return CANAL_ERROR_PARAMETER;
+  // Check pointer
+  if (NULL == pEvent) {
+    return CANAL_ERROR_PARAMETER;
+  }
+
+  CWebSockSrv *pdrvObj = getDriverObject(handle);
+  if (NULL == pdrvObj) {
+    return CANAL_ERROR_MEMORY;
+  }
+
+  if (-1 == (rv = vscp_sem_wait(&pdrvObj->m_semReceiveQueue, timeout))) {
+    if (ETIMEDOUT == errno) {
+      return CANAL_ERROR_TIMEOUT;
     }
-
-    CWebSockSrv* pdrvObj = getDriverObject(handle);
-    if (NULL == pdrvObj) {
-        return CANAL_ERROR_MEMORY;
+    else if (EINTR == errno) {
+      spdlog::error("[vscpl2drv-websocksrv] Interrupted by a signal handler");
+      return CANAL_ERROR_INTERNAL;
     }
-
-    if (-1 == (rv = vscp_sem_wait(&pdrvObj->m_semReceiveQueue, timeout))) {       
-        if (ETIMEDOUT == errno) {
-            return CANAL_ERROR_TIMEOUT;
-        } else if (EINTR == errno) {
-#ifndef WIN32            
-            syslog(LOG_ERR, "[vscpl2drv-tcpipsrv] Interrupted by a signal handler");
-#endif            
-            return CANAL_ERROR_INTERNAL;
-        } 
-        else if (EINVAL == errno) {
-#ifndef WIN32            
-            syslog(LOG_ERR, "[vscpl2drv-tcpipsrv] Invalid semaphore (timout)");
-#endif            
-            return CANAL_ERROR_INTERNAL;
-        } 
-        else if (EAGAIN == errno) {
-#ifndef WIN32            
-            syslog(LOG_ERR, "[vscpl2drv-tcpipsrv] Blocking error");
-#endif            
-            return CANAL_ERROR_INTERNAL;
-        } 
-        else {
-#ifndef WIN32            
-            syslog(LOG_ERR, "[vscpl2drv-tcpipsrv] Unknown error");
-#endif            
-            return CANAL_ERROR_INTERNAL;
-        }
+    else if (EINVAL == errno) {
+      spdlog::error("[vscpl2drv-websocksrv] Invalid semaphore (timeout)");
+      return CANAL_ERROR_INTERNAL;
     }
-
-
-    pthread_mutex_lock(&pdrvObj->m_mutexReceiveQueue);
-    vscpEvent* pLocalEvent = pdrvObj->m_receiveQueue.front();
-    pdrvObj->m_receiveQueue.pop_front();
-    pthread_mutex_unlock(&pdrvObj->m_mutexReceiveQueue);
-    if (NULL == pLocalEvent) {
-        return CANAL_ERROR_MEMORY;
+    else if (EAGAIN == errno) {
+      spdlog::error("[vscpl2drv-websocksrv] Blocking error");
+      return CANAL_ERROR_INTERNAL;
     }
+    else if (-1 == rv) {
+      spdlog::error("[vscpl2drv-websocksrv] Semaphore wait returned -1 (waitms >= 4000), clock_gettime failed, ");
+      return CANAL_ERROR_INTERNAL;
+    }
+    else {
+      spdlog::error("[vscpl2drv-websocksrv] Unknown error");
+      return CANAL_ERROR_INTERNAL;
+    }
+  }
 
-    vscp_copyEvent(pEvent, pLocalEvent);
-    vscp_deleteEvent_v2(&pLocalEvent);
+  pthread_mutex_lock(&pdrvObj->m_mutexReceiveQueue);
+  vscpEvent *pLocalEvent = pdrvObj->m_receiveQueue.front();
+  pdrvObj->m_receiveQueue.pop_front();
+  pthread_mutex_unlock(&pdrvObj->m_mutexReceiveQueue);
+  if (NULL == pLocalEvent) {
+    return CANAL_ERROR_MEMORY;
+  }
 
-    return CANAL_ERROR_SUCCESS;
+  vscp_copyEvent(pEvent, pLocalEvent);
+  vscp_deleteEvent_v2(&pLocalEvent);
+
+  return CANAL_ERROR_SUCCESS;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -325,11 +320,12 @@ VSCPRead(long handle, vscpEvent* pEvent, unsigned long timeout)
 extern "C" unsigned long
 VSCPGetVersion(void)
 {
-    unsigned long ver = MAJOR_VERSION << 24 |
-                        MINOR_VERSION << 16 |
-                        RELEASE_VERSION << 8 |
-                        BUILD_VERSION;
-    return ver;
+  unsigned long ver = (MAKE_VSCPL2DRV_WEBSOCKSRV_VERSION(VSCPL2DRV_WEBSOCKSRV_VERSION,
+                                                         VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION,
+                                                         VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION)
+                       << 8) |
+                      VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION;
+  return ver;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -339,5 +335,5 @@ VSCPGetVersion(void)
 extern "C" const char *
 VSCPGetVendorString(void)
 {
-    return VSCP_DLL_VENDOR;
+  return VSCP_DLL_VENDOR;
 }

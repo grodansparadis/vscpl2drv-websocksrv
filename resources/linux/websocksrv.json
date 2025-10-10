@@ -4,20 +4,12 @@
     "key-file" : "/etc/vscp/vscp.key",
     "max-out-queue" : 32000,
     "max-in-queue" : 32000,
-    "interface" : "9598",
+    "interface" : "8080",
     "encryption" : "aes256",
     "path-users" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/users.json",
     "tls" : {
-        "certificate" : "",
-        "certificate-chain" : "",
-        "verify-peer" : false,
-        "ca-path" : "",
-        "ca-file" : "",
-        "verify-depth" : 9,
-        "default-verify-paths" : true,
-        "cipher-list" : "DES-CBC3-SHA:AES128-SHA:AES128-GCM-SHA256",
-        "protocol-version" : 3,
-        "short-trust" : false
+      "certificate" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/certs/cert.pem",
+      "key" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/certs/key.pem"
     },
     "logging" : {
         "file-enable-log": true,
@@ -36,10 +28,11 @@
       "out-filter" : "outgoing filter on string form",
       "out-mask" : "outgoing mask on string form"
     },
-    "max-clients" : 10,
+    "max-clients" : 100,
     "enable-ws1" : true,
     "enable-ws2" : true,
     "enable-rest" : true,
+    "enable-static" : true,
     "url-ws1" : "ws1",
     "url-ws2" : "ws2",
     "url-rest" : "rest"

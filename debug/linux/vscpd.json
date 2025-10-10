@@ -2,7 +2,7 @@
   "runasuser" : "",
   "debug" : 4294967295,
   "guid" : "FF:FF:FF:FF:FF:FF:FF:F5:88:88:00:00:00:00:00:01",
-  "servername" : "The VSCP daemon - tcpipsrv test",
+  "servername" : "The VSCP daemon - vscpsocksrv test",
   "classtypedb" : "/var/lib/vscp/vscpd/vscp_events.sqlite3",
   "maindb" : "/var/lib/vscp/vscpd/vscp.sqlite3",
   "discoverydb" : "/var/lib/vscp/vscpd/vscp.sqlite3",
@@ -88,7 +88,7 @@
         "enable" : true,
         "name" : "tcpip-srv",
         "path-driver" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/build/libvscpl2drv-websocksrv.so",
-        "path-config" : "/home/akhe/development/VSCP/vscpl2drv-websocksrvsrv/debug/linux/websocksrv.json",
+        "path-config" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/linux/websocksrv.json",
         "guid" : "FF:FF:FF:FF:FF:FF:FF:F5:02:88:88:00:00:00:00:01",
 
         "mqtt": {

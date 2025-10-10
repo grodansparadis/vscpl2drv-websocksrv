@@ -308,7 +308,7 @@ class CTcpipSrv
     /// Filter for receive
     vscpEventFilter m_rxfilter;
 
-    /// Filter for transmitt
+    /// Filter for transmit
     vscpEventFilter m_txfilter;
 
     // The default random encryption key

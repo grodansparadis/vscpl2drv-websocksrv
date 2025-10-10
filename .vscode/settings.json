@@ -75,5 +75,12 @@
     "cmake.generator": "Unix Makefiles",
     "cSpell.language": "sv,en",
     "C_Cpp.vcpkg.enabled": false,
-    "cmake.cmakePath": "/usr/bin/cmake"
+    "cmake.cmakePath": "/usr/bin/cmake",
+    "C_Cpp.default.cppStandard": "",
+    "C_Cpp.default.cStandard": "",
+    "sarif-viewer.connectToGithubCodeScanning": "off",
+    "cSpell.words": [
+      "authorised",
+      "Hedman"
+    ]
 }

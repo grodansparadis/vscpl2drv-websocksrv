@@ -22,8 +22,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 #
-# VSCP_PATH - set to path to local vscp repository. Default is "../vscp". Set with
-# -DVSCP_PATH="path"
 #
 
 cmake_minimum_required(VERSION 3.5)
@@ -33,7 +31,7 @@ set(PACKAGE_AUTHOR "Ake Hedman, the VSCP Project")
 
 # Version settings
 if(NOT DEFINED MAJOR_VERSION)
-    SET(MAJOR_VERSION "15")
+    SET(MAJOR_VERSION "1")
 endif()
 if(NOT DEFINED MINOR_VERSION)
     SET(MINOR_VERSION "0")
@@ -79,10 +77,13 @@ if(NOT DEFINED WIN32)
   add_subdirectory(man)
 endif()
 
+# Test application
+add_subdirectory(testapp)
+
 option(USE_SSL "Use SSL" TRUE)
 
 ## --- C++11 build flags ---
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 
@@ -109,14 +110,16 @@ endif()
 
 if(WIN32)
 	add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-    add_definitions(-DWIN32_LEAN_AND_MEANS)
-    add_definitions(-DOPENSSL_API_1_1)
-    add_definitions(-D_POSIX_C_SOURCE)    
-    add_definitions(-DVCPKG_TARGET_TRIPLET=x64-windows)
-    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
-    set(LIBS_SYSTEM ws2_32)
+  add_definitions(-DWIN32_LEAN_AND_MEANS)
+  add_definitions(-DOPENSSL_API_1_1)
+  add_definitions(-D_POSIX_C_SOURCE)    
+  add_definitions(-DVCPKG_TARGET_TRIPLET=x64-windows)
+  add_definitions(-DMG_TLS=MG_TLS_OPENSSL)
+  set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  set(LIBS_SYSTEM ws2_32)
 elseif(UNIX)
   set(LIBS_SYSTEM c stdc++)
+  add_definitions(-DMG_TLS=MG_TLS_OPENSSL)
 endif()
 
 #   ===========================  cpack  ===========================
@@ -183,23 +186,14 @@ find_package(Threads REQUIRED)
 #openssl
 find_package(OpenSSL REQUIRED)
 
+# Expat C library
+  find_package(expat CONFIG REQUIRED)
+
 # Windows Libs
 if (WIN32)
   #find_package(pthreads REQUIRED)
-
-  # Expat C library
-  find_package(expat CONFIG REQUIRED)
 else()
 
-endif()
-
-# Set sockettcp build flags
-add_definitions(-DUSE_IPV6)
-string(FIND "${OPENSSL_VERSION}" "1.1." SSL_VER_POS)
-if(${SSL_VER_POS})
-  add_definitions(-DOPENSSL_API_1_0)
-else()
-  add_definitions(-DOPENSSL_API_1_1)
 endif()
 
 set(RESOURCE_FILES
@@ -207,13 +201,13 @@ set(RESOURCE_FILES
         forms/index.html)
 
 # Add files to library
-add_library(vscpl2drv-websocksrv
+add_library(${PROJECT_NAME}
   ./src/vscpl2drv-websocksrv.cpp
   ./src/websocksrv.cpp 
   ./third_party/vscp/src/vscp/common/userlist.h
   ./third_party/vscp/src/vscp/common/userlist.cpp
-  ./third_party/vscp/src/vscp/common/clientlist.h
-  ./third_party/vscp/src/vscp/common/clientlist.cpp
+  ./third_party/mongoose/mongoose.c
+  ./third_party/mongoose/mongoose.h
   ./third_party/Mustache/mustache.hpp
   ./third_party/spdlog/include
   ./third_party/vscp/src/vscp/common/vscp.h
@@ -224,10 +218,6 @@ add_library(vscpl2drv-websocksrv
   ./third_party/vscp/src/vscp/common/vscphelper.h
   ./third_party/vscp/src/vscp/common/vscphelper.cpp
   ./third_party/vscp/src/vscp/common/canal.h
-  ./third_party/vscp/src/common/sockettcp.h
-  ./third_party/vscp/src/common/sockettcp.c
-  ./third_party/vscp/src/common/vscpbase64.h
-  ./third_party/vscp/src/common/vscpbase64.c
   ./third_party/vscp/src/common/vscp-aes.h
   ./third_party/vscp/src/common/vscp-aes.c
   ./third_party/vscp/src/common/crc.h
@@ -272,7 +262,7 @@ else()
  endif()   
 
 if (WIN32)
-  target_link_libraries(vscpl2drv-websocksrv PRIVATE     
+  target_link_libraries(${PROJECT_NAME} PRIVATE     
     PThreads4W::PThreads4W_CXXEXC
     OpenSSL::SSL 
     OpenSSL::Crypto
@@ -281,20 +271,20 @@ if (WIN32)
   )
         
 else()
-  target_link_libraries(vscpl2drv-websocksrv PRIVATE     
+  target_link_libraries(${PROJECT_NAME} PRIVATE     
     m
     dl
     Threads::Threads
     OpenSSL::SSL 
     OpenSSL::Crypto
-    ${EXPAT_LIBRARIES}
+    expat::expat
   )
 endif()
 
 # Install
 if(WIN32)
   # Runtime files
-  install(TARGETS vscpl2drv-websocksrv
+  install(TARGETS ${PROJECT_NAME}
           RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   )
   # Dependencies
@@ -305,7 +295,7 @@ if(WIN32)
   # README
   install(FILES "${CMAKE_BINARY_DIR}/../README.md" DESTINATION "${CMAKE_INSTALL_BINDIR}/..")
 else()
-  install(TARGETS vscpl2drv-websocksrv
+  install(TARGETS ${PROJECT_NAME}
           LIBRARY DESTINATION ${CMAKE_INSTALL_FULL_}${VSCP_LEVEL2_DRV_DIR}
           RUNTIME DESTINATION ${CMAKE_INSTALL_MANDIR}            
           RESOURCE DESTINATION ${CMAKE_INSTALL_FULL_}/var/lib/vscp/vscpd) 

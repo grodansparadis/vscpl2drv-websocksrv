@@ -56,18 +56,17 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <syslog.h>
 #include <unistd.h>
 
 #include <mongoose.h>
 #include <expat.h>
 
-#include <version.h>
 #include <vscp.h>
 #include <vscp-aes.h>
 #include <vscp-debug.h>
 #include <vscphelper.h>
 
+#include "version.h"
 #include "websocksrv.h"
 
 #include <mustache.hpp>
@@ -84,71 +83,31 @@
 
 #define XML_BUFF_SIZE 0xffff
 
+// Websocket flags
+#define WEBSOCKET_OP_FINAL 0x80
+
 // https://github.com/nlohmann/json
 using json = nlohmann::json;
 
 using namespace kainjow::mustache;
 
-///////////////////////////////////////////////////
-//                 GLOBALS
-///////////////////////////////////////////////////
+// Forward declaration
+static void *
+websockWorkerThread(void *pData);
 
-// Webserver
-// extern struct mg_mgr gmgr;
-
-// Linked list of all active sessions. (webserv.h)
-// extern struct websrv_Session *gp_websrv_sessions;
-
-// Session structure for REST API
-// extern struct websrv_rest_session *gp_websrv_rest_sessions;
-
-// Prototypes
-// int
-// webserv_url_decode(const char *src, int src_len, char *dst, int dst_len, int is_form_url_encoded);
-
-// void
-// webserv_util_sendheader(struct mg_connection *nc, const int returncode, const char *content);
-
-////////////////////////////////////////////////////
-//            Forward declarations
-////////////////////////////////////////////////////
-
-//----------------------------------------------------
-//                      ws1
-//----------------------------------------------------
-// void
-// CWebSockSrv::ws1_command(struct mg_connection *conn, struct websock_session *pSession, std::string &strCmd);
-
-// bool
-// ws1_message(struct mg_connection *conn, websock_session *pSession, std::string &strWsPkt);
-
-//----------------------------------------------------
-//                      ws2
-//----------------------------------------------------
-
-// bool
-// ws2_command(struct mg_connection *conn, struct websock_session *pSession, std::string &strCmd, json &obj);
-
-// bool
-// ws2_message(struct mg_connection *conn, websock_session *pSession, std::string &strWsPkt);
-
-///////////////////////////////////////////////////
-//                 WEBSOCKETS
-///////////////////////////////////////////////////
-
-// Linked list of websocket sessions
-// Protected by the websocketSessionMutex
-// static struct websock_session *gp_websock_sessions;
+//////////////////////////////////////////////////////////////////////
+// CWebSockSession
+//
 
 CWebSockSession::CWebSockSession(void)
 {
-  m_wstypes    = WS_TYPE_1; // ws1 is default
+  setWsType(WS_TYPE_1); // ws1 is default
   m_conn_state = WEBSOCK_CONN_STATE_NULL;
   memset(m_key, 0, 33);
   memset(m_sid, 0, 33);
   m_version      = 0;
   lastActiveTime = 0;
-  m_pClientItem  = NULL;
+  m_conn         = nullptr;
   m_strConcatenated.clear();
 
   // Generate the sid
@@ -158,38 +117,20 @@ CWebSockSession::CWebSockSession(void)
   memset(hexiv, 0, sizeof(hexiv));
   vscp_byteArray2HexStr(hexiv, iv, 16);
 
-  // memset(m_sid, 0, sizeof(pSession->m_sid));
-  // memcpy(m_sid, hexiv, 32);
-  // memset(m_key, 0, sizeof(m_key));
+  memset(m_sid, 0, sizeof(m_sid));
+  memcpy(m_sid, hexiv, 32);
+  memset(m_key, 0, sizeof(m_key));
 
-  // Init.
-  // strcpy(m_key, ws_key); // Save key
+  vscp_clearVSCPFilter(&m_filter); // Clear filter
 
-  // Attach and initiate client object
-  m_pClientItem = new CClientItem(); // Create client
-  if (NULL == m_pClientItem) {
-    syslog(LOG_ERR, "[Websockets] New session: Unable to create client object.");
-    // delete pSession;
-    // return NULL;
-  }
+  // This is an inactive client
+  m_bOpen = false;
 
-  m_pClientItem->bAuthenticated = false;          // Not authenticated in yet
-  vscp_clearVSCPFilter(&m_pClientItem->m_filter); // Clear filter
-
-  // This is an active client
-  m_pClientItem->m_bOpen         = false;
-  m_pClientItem->m_dtutc         = vscpdatetime::Now();
-  m_pClientItem->m_type          = CLIENT_ITEM_INTERFACE_TYPE_CLIENT_WEBSOCKET;
-  m_pClientItem->m_strDeviceName = ("Websocket client level II  driver.");
+  setAuthenticated(false); // Not authenticated in yet
 };
 
-CWebSockSession::~CWebSockSession(void)
-{
-  // Deallocate the client item if it exists
-  if (nullptr != m_pClientItem) {
-    delete m_pClientItem; // Delete client item
-    m_pClientItem = NULL;
-  }
+CWebSockSession::~CWebSockSession(void) {
+
 };
 
 // ----------------------------------------------------------------------------
@@ -220,21 +161,80 @@ w2msg::~w2msg(void)
 
 // ----------------------------------------------------------------------------
 
+//////////////////////////////////////////////////////////////////////
+// CWebSockSrv
+//////////////////////////////////////////////////////////////////////
+
 //////////////////////////////////////////////////////////////////////////////////
 // Constructor
 //
 
 CWebSockSrv::CWebSockSrv(void)
 {
+  m_bQuit = false;
+
+  vscp_clearVSCPFilter(&m_rxfilter); // Accept all events
+  vscp_clearVSCPFilter(&m_txfilter); // Send all events
+
+  m_responseTimeout = WEBSOCKETSRV_DEFAULT_INNER_RESPONSE_TIMEOUT;
+
+  m_websockWorkerThread = 0;
+
   // Initialize mutex
+
+  sem_init(&m_semSendQueue, 0, 0);
+  sem_init(&m_semReceiveQueue, 0, 0);
+
+  pthread_mutex_init(&m_mutexSendQueue, NULL);
+  pthread_mutex_init(&m_mutexReceiveQueue, NULL);
   pthread_mutex_init(&m_mutex_websocketSession, NULL);
 
+  pthread_mutex_init(&m_mutex_UserList, NULL);
+
+  // Init pool
+  spdlog::init_thread_pool(8192, 1);
+
+  // Flush log every five seconds
+  spdlog::flush_every(std::chrono::seconds(5));
+
+  auto console = spdlog::stdout_color_mt("console");
+  // Start out with level=info. Config may change this
+  console->set_level(spdlog::level::debug);
+  console->set_pattern("[vscpl2drv-websocksrv: %c] [%^%l%$] %v");
+  spdlog::set_default_logger(console);
+
+  console->debug("Starting the vscpl2drv-websocksrv...");
+
+  // Setting up logging defaults
+  m_bConsoleLogEnable = true;
+  m_consoleLogLevel   = spdlog::level::info;
+  m_consoleLogPattern = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
+
+  m_bEnableFileLog   = true;
+  m_fileLogLevel     = spdlog::level::info;
+  m_fileLogPattern   = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
+  m_path_to_log_file = "/var/log/vscp/vscpl2drv-websocksrv.log";
+  m_max_log_size     = 5242880;
+  m_max_log_files    = 7;
+
+  m_bReceiveOwnEvents = true; // Receive our own events
+
   // Set default values
-  m_url       = "ws://localhost:8000";
-  m_web_root  = ".";
-  m_ca_path   = "/etc/vscp/certs/ca.pem";
-  m_cert_path = "/etc/vscp/certs/cert.pem";
-  m_key_path  = "/etc/vscp/certs/key.pem";
+  m_url      = "ws://localhost:8000";
+  m_web_root = ".";
+#ifdef WIN32
+  m_tls_certificate_path = "c:/vscp/certs/cert.pem";
+  m_tls_private_key_path = "c:/vscp/certs/key.pem";
+#else
+  m_tls_certificate_path = "/etc/vscp/certs/cert.pem";
+  m_tls_private_key_path = "/etc/vscp/certs/key.pem";
+#endif
+
+  m_maxClients    = 100;  // Max clients
+  m_bEnableWS1    = true; // Enable ws1
+  m_bEnableWS2    = true; // Enable ws2
+  m_bEnableREST   = true; // Enable REST
+  m_bEnableStatic = true; // Enable static web pages
 
   m_mgr = {}; // Initialize mongoose event manager
 }
@@ -245,29 +245,83 @@ CWebSockSrv::CWebSockSrv(void)
 
 CWebSockSrv::~CWebSockSrv(void)
 {
-  ;
+  close();
+
+  sem_destroy(&m_semSendQueue);
+  sem_destroy(&m_semReceiveQueue);
+
+  pthread_mutex_destroy(&m_mutexSendQueue);
+  pthread_mutex_destroy(&m_mutexReceiveQueue);
+
+  pthread_mutex_destroy(&m_mutex_UserList);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// init
+// open
 //
 
 int
-CWebSockSrv::init(std::string &url,
-                  std::string &web_root,
-                  std::string &ca_path,
-                  std::string &cert_path,
-                  std::string &key_path)
+CWebSockSrv::open(std::string &path, const uint8_t *pguid)
 {
-  // Set values
-  m_url       = url;
-  m_web_root  = web_root;
-  m_ca_path   = ca_path;
-  m_cert_path = cert_path;
-  m_key_path  = key_path;
+  int rv;
 
-  // Initialize mutex
-  pthread_mutex_init(&m_mutex_websocketSession, NULL);
+  // Must have a valid GUID
+  if (NULL == pguid) {
+    return false;
+  }
+
+  // Set GUID
+  m_guid.getFromArray(pguid);
+
+  // Save path for config file
+  m_path = path;
+
+  // Read configuration file
+  if (VSCP_ERROR_SUCCESS != (rv = doLoadConfig(path))) {
+    spdlog::error("[Websocket Server] Failed to load configuration file.");
+    return rv;
+  }
+
+  spdlog::debug("---> Open");
+
+  // Start the server
+  if (VSCP_ERROR_SUCCESS != start()) {
+    spdlog::critical("Failed to start server.");
+    spdlog::drop_all();
+    return VSCP_ERROR_INIT_FAIL;
+  }
+
+  spdlog::debug("Open <---");
+
+  // Everything is OK
+  m_bQuit = false;
+
+  // Open the websocket server
+  return VSCP_ERROR_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// close
+//
+
+int
+CWebSockSrv::close(void)
+{
+  // Do nothing if already terminated
+  if (m_bQuit) {
+    spdlog::drop_all();
+    return VSCP_ERROR_SUCCESS;
+  }
+
+  m_bQuit = true; // terminate the thread
+#ifndef WIN32
+  sleep(1); // Give the thread some time to terminate
+#else
+  Sleep(1000);
+#endif
+
+  spdlog::drop_all();
+  spdlog::shutdown();
 
   return VSCP_ERROR_SUCCESS;
 }
@@ -340,11 +394,10 @@ CWebSockSrv::doLoadConfig(std::string &path)
         str = j["file-log-level"].get<std::string>();
       }
       catch (const std::exception &ex) {
-        spdlog::error("[vscpl2drv-tcpipsrv]Failed to read 'file-log-level' Error='{}'", ex.what());
+        spdlog::error("[vscpl2drv-websocksrv]Failed to read 'file-log-level' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error("[vscpl2drv-tcpipsrv]Failed to read 'file-log-level' due "
-                      "to unknown error.");
+        spdlog::error("[vscpl2drv-websocksrv]Failed to read 'file-log-level' due to unknown error.");
       }
       vscp_makeLower(str);
       if (std::string::npos != str.find("off")) {
@@ -532,6 +585,86 @@ CWebSockSrv::doLoadConfig(std::string &path)
     spdlog::warn("ReadConfig: Failed to read 'path-users' Defaults will be used.");
   }
 
+  // Max number of clients
+  if (m_j_config.contains("max-clients")) {
+    try {
+      m_maxClients = m_j_config["max-clients"].get<uint16_t>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'max-clients' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'max-clients' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'max-clients' Defaults will be used.");
+  }
+
+  // Enable ws1
+  if (m_j_config.contains("enable-ws1")) {
+    try {
+      m_bEnableWS1 = m_j_config["enable-ws1"].get<bool>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'enable-ws1' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'enable-ws1' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'enable-ws1' Defaults will be used.");
+  }
+
+  // Enable ws2
+  if (m_j_config.contains("enable-ws2")) {
+    try {
+      m_bEnableWS2 = m_j_config["enable-ws2"].get<bool>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'enable-ws2' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'enable-ws2' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'enable-ws2' Defaults will be used.");
+  }
+
+  // Enable REST
+  if (m_j_config.contains("enable-rest")) {
+    try {
+      m_bEnableREST = m_j_config["enable-rest"].get<bool>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'enable-rest' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'enable-rest' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'enable-rest' Defaults will be used.");
+  }
+
+  // Enable static web
+  if (m_j_config.contains("enable-static")) {
+    try {
+      m_bEnableStatic = m_j_config["enable-static"].get<bool>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'enable-static' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'enable-static' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'enable-static' Defaults will be used.");
+  }
+
   // Response timeout m_responseTimeout
   if (m_j_config.contains("response-timeout")) {
     try {
@@ -557,7 +690,7 @@ CWebSockSrv::doLoadConfig(std::string &path)
     if (j.contains("in-filter")) {
       try {
         std::string str = j["in-filter"].get<std::string>();
-        vscp_readFilterFromString(&m_filterIn, str.c_str());
+        vscp_readFilterFromString(&m_rxfilter, str.c_str());
       }
       catch (const std::exception &ex) {
         spdlog::error("ReadConfig: Failed to read 'in-filter' Error='{}'", ex.what());
@@ -575,7 +708,7 @@ CWebSockSrv::doLoadConfig(std::string &path)
     if (j.contains("in-mask")) {
       try {
         std::string str = j["in-mask"].get<std::string>();
-        vscp_readMaskFromString(&m_filterIn, str.c_str());
+        vscp_readMaskFromString(&m_rxfilter, str.c_str());
       }
       catch (const std::exception &ex) {
         spdlog::error("ReadConfig: Failed to read 'in-mask' Error='{}'", ex.what());
@@ -592,7 +725,7 @@ CWebSockSrv::doLoadConfig(std::string &path)
     if (j.contains("out-filter")) {
       try {
         std::string str = j["in-filter"].get<std::string>();
-        vscp_readFilterFromString(&m_filterOut, str.c_str());
+        vscp_readFilterFromString(&m_txfilter, str.c_str());
       }
       catch (const std::exception &ex) {
         spdlog::error("ReadConfig: Failed to read 'out-filter' Error='{}'", ex.what());
@@ -609,7 +742,7 @@ CWebSockSrv::doLoadConfig(std::string &path)
     if (j.contains("out-mask")) {
       try {
         std::string str = j["out-mask"].get<std::string>();
-        vscp_readMaskFromString(&m_filterOut, str.c_str());
+        vscp_readMaskFromString(&m_txfilter, str.c_str());
       }
       catch (const std::exception &ex) {
         spdlog::error("ReadConfig: Failed to read 'out-mask' Error='{}'", ex.what());
@@ -631,7 +764,7 @@ CWebSockSrv::doLoadConfig(std::string &path)
     // Certificate
     if (j.contains("certificate")) {
       try {
-        m_tls_certificate = j["certificate"].get<std::string>();
+        m_tls_certificate_path = j["certificate"].get<std::string>();
       }
       catch (const std::exception &ex) {
         spdlog::error("ReadConfig: Failed to read 'certificate' Error='{}'", ex.what());
@@ -644,154 +777,20 @@ CWebSockSrv::doLoadConfig(std::string &path)
       spdlog::debug("ReadConfig: Failed to read 'certificate' Defaults will be used.");
     }
 
-    // certificate chain
-    if (j.contains("certificate_chain")) {
+    // private key
+    if (j.contains("key")) {
       try {
-        m_tls_certificate_chain = j["certificate_chain"].get<std::string>();
+        m_tls_private_key_path = j["key"].get<std::string>();
       }
       catch (const std::exception &ex) {
-        spdlog::error("ReadConfig: Failed to read 'certificate_chain' Error='{}'", ex.what());
+        spdlog::error("ReadConfig:Failed to read 'key' Error='{}'", ex.what());
       }
       catch (...) {
-        spdlog::error("ReadConfig: Failed to read 'certificate_chain' due to "
-                      "unknown error.");
+        spdlog::error("ReadConfig:Failed to read 'key' due to unknown error.");
       }
     }
     else {
-      spdlog::debug("ReadConfig: Failed to read 'certificate_chain' Defaults "
-                    "will be used.");
-    }
-
-    // verify peer
-    if (j.contains("verify-peer")) {
-      try {
-        m_tls_verify_peer = j["verify-peer"].get<bool>();
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig: Failed to read 'verify-peer' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig: Failed to read 'verify-peer' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'verify-peer' Defaults will be used.");
-    }
-
-    // CA Path
-    if (j.contains("ca-path")) {
-      try {
-        m_tls_ca_file = j["ca-path"].get<std::string>();
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig: Failed to read 'ca-path' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig: Failed to read 'ca-path' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: ReadConfig: Failed to read 'ca-path' Defaults "
-                    "will be used.");
-    }
-
-    // CA File
-    if (j.contains("ca-file")) {
-      try {
-        m_tls_ca_file = j["ca-file"].get<std::string>();
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig: Failed to read 'ca-file' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig: Failed to read 'ca-file' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: ReadConfig: Failed to read 'ca-file' Defaults "
-                    "will be used.");
-    }
-
-    // Verify depth
-    if (j.contains("verify_depth")) {
-      try {
-        m_tls_verify_depth = j["verify_depth"].get<uint16_t>();
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig: Failed to read 'verify_depth' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig: Failed to read 'verify_depth' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'verify_depth' Defaults will be used.");
-    }
-
-    // Default verify paths
-    if (j.contains("default-verify-paths")) {
-      try {
-        m_tls_default_verify_paths = j["default-verify-paths"].get<bool>();
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig:Failed to read 'default-verify-paths' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig:Failed to read 'default-verify-paths' due to "
-                      "unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'default-verify-paths' "
-                    "Defaults will be used.");
-    }
-
-    // Chiper list
-    if (j.contains("cipher-list")) {
-      try {
-        m_tls_cipher_list = j["cipher-list"].get<std::string>();
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig:Failed to read 'cipher-list' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig:Failed to read 'cipher-list' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'cipher-list' Defaults will be used.");
-    }
-
-    // Protocol version
-    if (j.contains("protocol-version")) {
-      try {
-        m_tls_protocol_version = j["protocol-version"].get<uint16_t>();
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig:Failed to read 'protocol-version' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig:Failed to read 'protocol-version' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'protocol-version' Defaults will be used.");
-    }
-
-    // Short trust
-    if (j.contains("short-trust")) {
-      try {
-        m_tls_short_trust = j["short-trust"].get<bool>();
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig:Failed to read 'short-trust' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig:Failed to read 'short-trust' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'short-trust' Defaults will be used.");
+      spdlog::debug("ReadConfig: Failed to read 'key' Defaults will be used.");
     }
   }
 
@@ -856,15 +855,14 @@ CWebSockSrv::doSaveConfig(void)
 int
 CWebSockSrv::start(void)
 {
-  // TODO_ Start workerthread
+  spdlog::debug("Controlobject: Starting WebSocket interface...");
 
-  // mg_mgr_init(&m_mgr); // Initialise mongoose event manager
-  // printf("Starting WS listener on %s/websocket\n", m_listen_on.c_str());
-  // mg_http_listen(&m_mgr, m_listen_on.c_str(), fn, NULL); // Create HTTP listener
-  // for (;;) {
-  //   mg_mgr_poll(&mgr, 1000); // Infinite event loop
-  // }
-  // mg_mgr_free(&m_mgr);      // Free mongoose event manager
+  m_bQuit = false;
+
+  if (pthread_create(&m_websockWorkerThread, NULL, websockWorkerThread, this)) {
+    spdlog::error("Controlobject: Unable to start the websocket worker thread.");
+    return VSCP_ERROR_ERROR;
+  }
 
   return VSCP_ERROR_SUCCESS;
 }
@@ -876,79 +874,326 @@ CWebSockSrv::start(void)
 int
 CWebSockSrv::stop(void)
 {
-  // TODO: Stop workerthread
-  // mg_mgr_free(&m_mgr);
-  return VSCP_ERROR_SUCCESS;
-}
-////////////////////////////////////////////////////////////////////////////////
-// open
-//
-
-int
-CWebSockSrv::open(std::string &path, const uint8_t *pguid)
-{
-  int rv;
-
-  // Save path to config file
-  m_pathConfig = path;
-
-  // Read configuration file
-  if (VSCP_ERROR_SUCCESS != (rv = doLoadConfig(path))) {
-    syslog(LOG_ERR, "[Websocket Server] Failed to load configuration file.");
-    return rv;
-  }
-
-  // Set the driver GUID
-  if (NULL != pguid) {
-    memcpy(m_guid, pguid, 16);
-  }
-  else {
-    // No GUID specified - use all zeros
-    memset(m_guid, 0, 16);
-  }
-
-  // // Initialize user list
-  // if (!m_userList.init()) {
-  //   syslog(LOG_ERR, "[Websocket Server] Failed to initialize user list.");
-  //   return VSCP_ERROR_FAILURE;
-  // }
-
-  // // Read user list
-  // if (!m_userList.loadFromDatabase()) {
-  //   syslog(LOG_ERR, "[Websocket Server] Failed to load user list from database.");
-  //   return VSCP_ERROR_FAILURE;
-  // }
-
-  // Start the server
-  if (VSCP_ERROR_SUCCESS != start()) {
-    syslog(LOG_ERR, "[Websocket Server] Failed to start server.");
-    return VSCP_ERROR_ERROR;
-  }
-
-  // Everything is OK
-  m_bQuit = false;
-
-  // Open the websocket server
-  return VSCP_ERROR_SUCCESS;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// close
-//
-
-int
-CWebSockSrv::close(void)
-{
-  // Stop the server
-  if (VSCP_ERROR_SUCCESS != stop()) {
-    syslog(LOG_ERR, "[Websocket Server] Failed to stop server.");
-    return VSCP_ERROR_ERROR;
-  }
-
-  // Everything is OK
+  // Tell the thread it's time to quit
   m_bQuit = true;
 
+  spdlog::debug("Controlobject: Terminating WebSocket thread.");
+
+  // Wait for thread to finish and clean up
+  if (!m_websockWorkerThread) { // Check if thread was created
+    // Not started
+    return VSCP_ERROR_SUCCESS;
+  }
+
+  pthread_join(m_websockWorkerThread, NULL);
+  m_websockWorkerThread = 0; // Reset thread ID
+
+  spdlog::debug("Controlobject: Terminated WebSocket thread.");
+
   return VSCP_ERROR_SUCCESS;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// restart
+//
+
+int
+CWebSockSrv::restart(void)
+{
+  if (!stop()) {
+    spdlog::warn("Failed to stop VSCP websocket server.");
+  }
+
+  if (!start()) {
+    spdlog::warn("Failed to start VSCP websocket server.");
+  }
+
+  return VSCP_ERROR_SUCCESS;
+}
+
+//////////////////////////////////////////////////////////////////////
+// addEvent2SendQueue
+//
+//
+
+// int
+// CWebSockSrv::addEvent2SendQueue(const vscpEvent *pEvent)
+// {
+//   pthread_mutex_lock(&m_mutexSendQueue);
+//   m_sendList.push_back((vscpEvent *) pEvent);
+//   sem_post(&m_semSendQueue);
+//   pthread_mutex_unlock(&m_mutexSendQueue);
+//   return VSCP_ERROR_SUCCESS;
+// }
+
+//////////////////////////////////////////////////////////////////////
+// addEvent2ReceiveQueue
+//
+//  Send event to host
+//
+
+int
+CWebSockSrv::addEvent2ReceiveQueue(const vscpEvent *pEvent)
+{
+  pthread_mutex_lock(&m_mutexReceiveQueue);
+  m_receiveList.push_back((vscpEvent *) pEvent);
+  pthread_mutex_unlock(&m_mutexReceiveQueue);
+  sem_post(&m_semReceiveQueue);
+  return VSCP_ERROR_SUCCESS;
+}
+
+//////////////////////////////////////////////////////////////////////
+// addEvent2ReceiveQueue
+//
+
+int
+CWebSockSrv::addEvent2ReceiveQueue(vscpEventEx &ex)
+{
+  vscpEvent *pev = new vscpEvent();
+  if (!vscp_convertEventExToEvent(pev, &ex)) {
+    spdlog::error("Failed to convert event from ex to ev.");
+    vscp_deleteEvent(pev);
+    return false;
+  }
+
+  if (NULL == pev) {
+    spdlog::error("addEvent2ReceiveQueue - Unable to allocate event storage.");
+    return false;
+  }
+
+  if (vscp_doLevel2Filter(pev, &m_rxfilter)) {
+    pthread_mutex_lock(&m_mutexReceiveQueue);
+    m_receiveList.push_back(pev);
+    pthread_mutex_unlock(&m_mutexReceiveQueue);
+    sem_post(&m_semReceiveQueue);
+  }
+  else {
+    vscp_deleteEvent(pev);
+  }
+  return VSCP_ERROR_SUCCESS;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// sendEventToClient
+//
+
+int
+CWebSockSrv::sendEventToClient(CWebSockSession *pSessionItem, const vscpEvent *pEvent)
+{
+  // Must be valid pointers
+  if (NULL == pSessionItem) {
+    spdlog::error("sendEventToClient - Pointer to session item is null");
+    return VSCP_ERROR_INVALID_POINTER;
+  }
+  if (NULL == pEvent) {
+    spdlog::error("sendEventToClient - Pointer to event is null");
+    return VSCP_ERROR_INVALID_POINTER;
+  }
+
+  // Check if filtered out - if so do nothing here
+  if (!vscp_doLevel2Filter(pEvent, &pSessionItem->getFilter())) {
+    if (m_j_config.contains("debug") && m_j_config["debug"].get<bool>()) {
+      spdlog::debug("sendEventToClient - Filtered out");
+    }
+    return false;
+  }
+
+  // If the client queue is full for this client then the
+  // client will not receive the message
+  if (pSessionItem->m_inputQueue.size() > m_j_config.value("max-out-queue", MAX_ITEMS_IN_QUEUE)) {
+    if (m_j_config.contains("debug") && m_j_config["debug"].get<bool>()) {
+      spdlog::debug("sendEventToClient - overrun");
+    }
+    return false;
+  }
+
+  // Create a new event
+  vscpEvent *pnewev = new vscpEvent;
+  if (NULL != pnewev) {
+
+    // Copy in the new event
+    if (!vscp_copyEvent(pnewev, pEvent)) {
+      vscp_deleteEvent_v2(&pnewev);
+      return false;
+    }
+
+    // Add the new event to the input queue
+    pthread_mutex_lock(&pSessionItem->m_mutexInputQueue);
+    pSessionItem->m_inputQueue.push_back(pnewev);
+    pthread_mutex_unlock(&pSessionItem->m_mutexInputQueue);
+    sem_post(&pSessionItem->m_semInputQueue);
+  }
+
+  return VSCP_ERROR_SUCCESS;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// sendEventAllClients
+//
+
+int
+CWebSockSrv::sendEventAllClients(const vscpEvent *pEvent)
+{
+
+  if (NULL == pEvent) {
+    spdlog::error("sendEventAllClients - No event to send");
+    return false;
+  }
+
+  pthread_mutex_lock(&m_mutex_websocketSession);
+  std::map<unsigned long, CWebSockSession *>::iterator it;
+  for (it = m_websocketSessionMap.begin(); it != m_websocketSessionMap.end(); ++it) {
+    CWebSockSession *pSessionItem = it->second;
+
+    if (NULL != pSessionItem) {
+      if (m_j_config.contains("debug") && m_j_config["debug"].get<bool>()) {
+        spdlog::debug("Send event to client {}", pSessionItem->getConnection()->id);
+      }
+      if (!sendEventToClient(pSessionItem, pEvent)) {
+        spdlog::error("sendEventAllClients - Failed to send event");
+      }
+    }
+  } // for
+
+  pthread_mutex_unlock(&m_mutex_websocketSession);
+  mg_wakeup(&m_mgr, 0, nullptr, 0);
+
+  return VSCP_ERROR_SUCCESS;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// sendEvent
+//
+// Send event to all other clients.
+//
+
+// int
+// CWebSockSrv::sendEvent(struct mg_connection *conn, vscpEvent *pev)
+// {
+//   // Check pointers
+//   if (NULL == conn) {
+//     spdlog::error( "Internal error: sendEvent - conn == NULL");
+//     return false;
+//   }
+
+//   CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
+//  if (NULL == pSession) {
+//     spdlog::error( "Internal error: sendEvent - pSession == NULL");
+//     return false;
+//   }
+
+//   if (NULL == pev) {
+//     spdlog::error( "Internal error: sendEvent - pEvent == NULL");
+//     return false;
+//   }
+
+//   return sendEvent(pSession->getClientItem(), pev);
+// }
+
+///////////////////////////////////////////////////////////////////////////////
+// sendEventEx
+//
+// Send event to all other clients.
+//
+
+// bool
+// CWebSockSrv::sendEventEx(struct mg_connection *conn, vscpEventEx *pex)
+// {
+//   // Check pointers
+//   if (NULL == conn) {
+//     spdlog::error( "Internal error: sendEvent - conn == NULL");
+//     return false;
+//   }
+
+//   CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
+//  if (NULL == pSession) {
+//     spdlog::error( "Internal error: sendEvent - pSession == NULL");
+//     return false;
+//   }
+
+//   if (NULL == pex) {
+//     spdlog::error( "Internal error: sendEvent - pEvent == NULL");
+//     return false;
+//   }
+
+//   return sendEvent(pSession->getClientItem(), pex);
+// }
+
+///////////////////////////////////////////////////////////////////////////////
+// postIncomingEvent
+//
+
+void
+CWebSockSrv::postIncomingEvent(void)
+{
+  pthread_mutex_lock(&m_mutex_websocketSession);
+
+  std::map<unsigned long, CWebSockSession *>::iterator iter;
+  for (iter = m_websocketSessionMap.begin(); iter != m_websocketSessionMap.end(); ++iter) {
+
+    CWebSockSession *pSession = iter->second;
+    if (NULL == pSession) {
+      continue;
+    }
+
+    if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED) {
+      continue;
+    }
+
+    if (NULL == pSession->getConnection()) {
+      continue;
+    }
+
+    if (pSession->isOpen() && pSession->m_inputQueue.size()) {
+
+      vscpEvent *pEvent;
+      pthread_mutex_lock(&pSession->m_mutexInputQueue);
+      pEvent = pSession->m_inputQueue.front();
+      pSession->m_inputQueue.pop_front();
+      pthread_mutex_unlock(&pSession->m_mutexInputQueue);
+      if (NULL != pEvent) {
+
+        if ((pSession->getConnection() == NULL) && (1)) {
+          vscp_deleteEvent_v2(&pEvent);
+          continue;
+        }
+
+        // Run event through filter
+        if (vscp_doLevel2Filter(pEvent, &pSession->getFilter())) {
+
+          // User must be authorised to receive events
+          if (!(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_RCV_EVENT)) {
+            continue;
+          }
+
+          // spdlog::debug("Received ws event %s", str.c_str());
+
+          // Write it out
+          if (WS_TYPE_1 == pSession->getWsType()) {
+            std::string str;
+            if (vscp_convertEventToString(str, pEvent)) {
+              str = ("E;") + str;
+              mg_ws_send(pSession->getConnection(), (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+            }
+          }
+          else if (WS_TYPE_2 == pSession->getWsType()) {
+            std::string strEvent;
+            vscp_convertEventToJSON(strEvent, pEvent);
+            std::string str = vscp_str_format(WS2_EVENT, strEvent.c_str());
+            mg_ws_send(pSession->getConnection(), (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+          }
+        }
+
+        // Remove the event
+        vscp_deleteEvent_v2(&pEvent);
+
+      } // Valid pEvent pointer
+
+    } // events available
+
+  } // for
+
+  pthread_mutex_unlock(&m_mutex_websocketSession);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -970,29 +1215,32 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strIV, std:
 
   // Check pointers
   if ((NULL == conn)) {
-    syslog(LOG_ERR, "[Websocket Client] Authentication: Invalid connection context pointer.");
+    spdlog::error("[Websocket Client] Authentication: Invalid connection context pointer.");
     return false;
   }
 
-  CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
+  CWebSockSrv *pWebSockSrv = (CWebSockSrv *) conn->fn_data;
+  if (NULL == pWebSockSrv) {
+    spdlog::error("websockWorkerThread: Invalid CWebSockSrv pointer.");
+    return false;
+  }
 
+  CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
   if (NULL == pSession) {
-    syslog(LOG_ERR, "[Websocket Client] Authentication: Invalid session pointer. ");
+    spdlog::error("[Websocket Client] Authentication: Invalid session pointer. ");
     return false;
   }
 
   if (0 == vscp_hexStr2ByteArray(iv, 16, (const char *) strIV.c_str())) {
-    syslog(LOG_ERR,
-           "[Websocket Client] Authentication: No room "
-           "for iv block. ");
+    spdlog::error("[Websocket Client] Authentication: No room "
+                  "for iv block. ");
     return false; // Not enough room in buffer
   }
 
   size_t len;
   if (0 == (len = vscp_hexStr2ByteArray(secret, strCrypto.length(), (const char *) strCrypto.c_str()))) {
-    syslog(LOG_ERR,
-           "[Websocket Client] Authentication: No room "
-           "for crypto block. ");
+    spdlog::error("[Websocket Client] Authentication: No room "
+                  "for crypto block. ");
     return false; // Not enough room in buffer
   }
 
@@ -1005,9 +1253,8 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strIV, std:
 
   // Get username
   if (tokens.empty()) {
-    syslog(LOG_ERR,
-           "[Websocket Client] Authentication: Missing "
-           "username from client. ");
+    spdlog::error("[Websocket Client] Authentication: Missing "
+                  "username from client. ");
     return false; // No username
   }
 
@@ -1017,9 +1264,8 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strIV, std:
 
   // Get password
   if (tokens.empty()) {
-    syslog(LOG_ERR,
-           "[Websocket Client] Authentication: Missing "
-           "password from client. ");
+    spdlog::error("[Websocket Client] Authentication: Missing "
+                  "password from client. ");
     return false; // No username
   }
 
@@ -1030,9 +1276,8 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strIV, std:
   // Check if user is valid
   CUserItem *pUserItem = m_userList.getUser(strUser);
   if (NULL == pUserItem) {
-    syslog(LOG_ERR,
-           "[Websocket Client] Authentication: CUserItem "
-           "allocation problem ");
+    spdlog::error("[Websocket Client] Authentication: CUserItem "
+                  "allocation problem ");
     return false;
   }
 
@@ -1041,7 +1286,7 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strIV, std:
 
   if (!bValidHost) {
     // Log valid login
-    // syslog(LOG_ERR,
+    // spdlog::error(
     //        "[Websocket Client] Authentication: Host "
     //        "[%s] NOT allowed to connect.",
     //        conn->rem.ip.c_str());
@@ -1050,7 +1295,7 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strIV, std:
 
   // TODO
   // if (!vscp_isPasswordValid(pUserItem->getPasswordHash(), strPassword)) {
-  //   syslog(LOG_ERR,
+  //   spdlog::error(
   //          "[Websocket Client] Authentication: User %s at host "
   //          "[%s] gave wrong password.",
   //          (const char *) strUser.c_str(),
@@ -1061,13 +1306,13 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strIV, std:
   // pSession->getClientItem()->bAuthenticated = true;
 
   // // Add user to client
-  // pSession->getClientItem()->m_pUserItem = pUserItem;
+  // pSession->getUserItem() = pUserItem;
 
   // // Copy in the user filter
   // memcpy(&pSession->getClientItem()->m_filter, pUserItem->getUserFilter(), sizeof(vscpEventFilter));
 
   // Log valid login
-  // syslog(LOG_ERR,
+  // spdlog::error(
   //        "[Websocket Client] Authentication: Host [%s] "
   //        "User [%s] allowed to connect.",
   //        conn->rem.ip.c_str(),
@@ -1080,226 +1325,108 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strIV, std:
 // newSession
 //
 
-// websock_session *
-// CWebSockSrv::newSession(const struct mg_connection *conn)
-// {
-//   const char *pHeader;
-//   char ws_version[10];
-//   char ws_key[33];
-//   websock_session *pSession = NULL;
-
-//   // Check pointers
-//   if (NULL == conn)
-//     return NULL;
-
-//   // user
-//   memset(ws_version, 0, sizeof(ws_version));
-//   if (NULL != (pHeader = mg_get_header(conn, "Sec-WebSocket-Version"))) {
-//     strncpy(ws_version, pHeader, std::min(strlen(pHeader) + 1, sizeof(ws_version)));
-//   }
-//   memset(ws_key, 0, sizeof(ws_key));
-//   if (NULL != (pHeader = mg_get_header(conn, "Sec-WebSocket-Key"))) {
-//     strncpy(ws_key, pHeader, std::min(strlen(pHeader) + 1, sizeof(ws_key)));
-//   }
-
-//   // create fresh session
-//   pSession = new websock_session;
-//   if (NULL == pSession) {
-//     syslog(LOG_ERR, "[Websockets] New session: Unable to create session object.");
-//     return NULL;
-//   }
-
-//   // Generate the sid
-//   unsigned char iv[16];
-//   char hexiv[33];
-//   getRandomIV(iv, 16); // Generate 16 random bytes
-//   memset(hexiv, 0, sizeof(hexiv));
-//   vscp_byteArray2HexStr(hexiv, iv, 16);
-
-//   memset(pSession->m_sid, 0, sizeof(pSession->m_sid));
-//   memcpy(pSession->m_sid, hexiv, 32);
-//   memset(pSession->m_key, 0, sizeof(pSession->m_key));
-
-//   // Init.
-//   strcpy(pSession->m_key, ws_key); // Save key
-//   pSession->getConn()       = (struct mg_connection *) conn;
-//   pSession->getConnState() = WEBSOCK_CONN_STATE_CONNECTED;
-//   pSession->m_version    = atoi(ws_version); // Store protocol version
-
-//   pSession->getClientItem() = new CClientItem(); // Create client
-//   if (NULL == pSession->getClientItem()) {
-//     syslog(LOG_ERR, "[Websockets] New session: Unable to create client object.");
-//     delete pSession;
-//     return NULL;
-//   }
-
-//   pSession->getClientItem()->bAuthenticated = false;          // Not authenticated in yet
-//   vscp_clearVSCPFilter(&pSession->getClientItem()->m_filter); // Clear filter
-
-//   // This is an active client
-//   pSession->getClientItem()->m_bOpen         = false;
-//   pSession->getClientItem()->m_dtutc         = vscpdatetime::Now();
-//   pSession->getClientItem()->m_type          = CLIENT_ITEM_INTERFACE_TYPE_CLIENT_WEBSOCKET;
-//   pSession->getClientItem()->m_strDeviceName = ("Internal websocket client.");
-
-//   // Add the client to the Client List
-//   pthread_mutex_lock(&m_clientList.m_mutexItemList);
-//   if (!addClient(pSession->getClientItem())) {
-//     // Failed to add client
-//     delete pSession->getClientItem();
-//     pSession->getClientItem() = NULL;
-//     pthread_mutex_unlock(&m_clientList.m_mutexItemList);
-//     syslog(LOG_ERR, ("Websocket server: Failed to add client. Terminating thread."));
-//     return NULL;
-//   }
-//   pthread_mutex_unlock(&m_clientList.m_mutexItemList);
-
-//   pthread_mutex_lock(&m_mutex_websocketSession);
-//   m_websocketSessions.push_back(pSession);
-//   pthread_mutex_unlock(&m_mutex_websocketSession);
-
-//   // Use the session object as user data
-//   mg_set_user_connection_data(pSession->getConn(), (void *) pSession);
-
-//   return pSession;
-// }
-
-///////////////////////////////////////////////////////////////////////////////
-// sendEvent
-//
-// Send event to all other clients.
-//
-
-// int
-// CWebSockSrv::sendEvent(struct mg_connection *conn, vscpEvent *pev)
-// {
-//   // Check pointers
-//   if (NULL == conn) {
-//     syslog(LOG_ERR, "Internal error: sendEvent - conn == NULL");
-//     return false;
-//   }
-
-//   CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
-//   if (NULL == pSession) {
-//     syslog(LOG_ERR, "Internal error: sendEvent - pSession == NULL");
-//     return false;
-//   }
-
-//   if (NULL == pev) {
-//     syslog(LOG_ERR, "Internal error: sendEvent - pEvent == NULL");
-//     return false;
-//   }
-
-//   return sendEvent(pSession->getClientItem(), pev);
-// }
-
-///////////////////////////////////////////////////////////////////////////////
-// sendEventEx
-//
-// Send event to all other clients.
-//
-
-// bool
-// CWebSockSrv::sendEventEx(struct mg_connection *conn, vscpEventEx *pex)
-// {
-//   // Check pointers
-//   if (NULL == conn) {
-//     syslog(LOG_ERR, "Internal error: sendEvent - conn == NULL");
-//     return false;
-//   }
-
-//   CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
-//   if (NULL == pSession) {
-//     syslog(LOG_ERR, "Internal error: sendEvent - pSession == NULL");
-//     return false;
-//   }
-
-//   if (NULL == pex) {
-//     syslog(LOG_ERR, "Internal error: sendEvent - pEvent == NULL");
-//     return false;
-//   }
-
-//   return sendEvent(pSession->getClientItem(), pex);
-// }
-
-///////////////////////////////////////////////////////////////////////////////
-// postIncomingEvent
-//
-
-void
-CWebSockSrv::postIncomingEvent(void)
+CWebSockSession *
+CWebSockSrv::newSession(unsigned long id, const char *pws_version, const char *pws_key)
 {
+  // const char *pHeader;
+  //  char ws_version[10];
+  //  char ws_key[33];
+  CWebSockSession *pSession = NULL;
+
+  // memset(ws_version, 0, sizeof(ws_version));
+  //  if (NULL != (pHeader = mg_get_header(conn, "Sec-WebSocket-Version"))) {
+  //    strncpy(ws_version, pHeader, std::min(strlen(pHeader) + 1, sizeof(ws_version)));
+  //  }
+  //  memset(ws_key, 0, sizeof(ws_key));
+  //  if (NULL != (pHeader = mg_get_header(conn, "Sec-WebSocket-Key"))) {
+  //    strncpy(ws_key, pHeader, std::min(strlen(pHeader) + 1, sizeof(ws_key)));
+  //  }
+
+  // Create fresh session
+  pSession = new CWebSockSession;
+  if (NULL == pSession) {
+    spdlog::error("[Websockets] New session: Unable to create session object.");
+    return NULL;
+  }
+
+  // Generate the sid
+  unsigned char iv[16];
+  char hexiv[33];
+  getRandomIV(iv, 16); // Generate 16 random bytes
+  memset(hexiv, 0, sizeof(hexiv));
+  vscp_byteArray2HexStr(hexiv, iv, 16);
+
+  // memset(pSession->m_sid, 0, sizeof(pSession->m_sid));
+  // memcpy(pSession->m_sid, hexiv, 32);
+  // memset(pSession->m_key, 0, sizeof(pSession->m_key));
+
+  pSession->setSid(hexiv);
+
+  // Init.
+  pSession->setKey(pws_key);
+  pSession->setConnState(WEBSOCK_CONN_STATE_CONNECTED);
+  pSession->setVersion(atoi(pws_version)); // Store protocol version
+
+  // Add the client to the Client List
+  // pthread_mutex_lock(&m_clientList.m_mutexItemList);
+  // if (!addClient(pSession->getClientItem())) {
+  //   // Failed to add client
+  //   delete pSession->getClientItem();
+  //   pthread_mutex_unlock(&m_clientList.m_mutexItemList);
+  //   spdlog::error(("Websocket server: Failed to add client. Terminating thread."));
+  //   return NULL;
+  // }
+  // pthread_mutex_unlock(&m_clientList.m_mutexItemList);
+
   pthread_mutex_lock(&m_mutex_websocketSession);
-
-  std::list<CWebSockSession *>::iterator iter;
-  for (iter = m_websocketSessions.begin(); iter != m_websocketSessions.end(); ++iter) {
-
-    CWebSockSession *pSession = *iter;
-    if (NULL == pSession) {
-      continue;
-    }
-
-    // Should be a client item... hmm.... client disconnected
-    if (NULL == pSession->getClientItem()) {
-      continue;
-    }
-
-    if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED) {
-      continue;
-    }
-
-    if (NULL == pSession->getConn()) {
-      continue;
-    }
-
-    if (pSession->getClientItem()->m_bOpen && pSession->getClientItem()->m_clientInputQueue.size()) {
-
-      vscpEvent *pEvent;
-      pthread_mutex_lock(&pSession->getClientItem()->m_mutexClientInputQueue);
-      pEvent = pSession->getClientItem()->m_clientInputQueue.front();
-      pSession->getClientItem()->m_clientInputQueue.pop_front();
-      pthread_mutex_unlock(&pSession->getClientItem()->m_mutexClientInputQueue);
-      if (NULL != pEvent) {
-
-        // Run event through filter
-        if (vscp_doLevel2Filter(pEvent, &pSession->getClientItem()->m_filter)) {
-
-          // User must be authorized to receive events
-          if (!(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_RCV_EVENT)) {
-            continue;
-          }
-
-          std::string str;
-          if (vscp_convertEventToString(str, pEvent)) {
-
-#ifdef __VSCP_DEBUG_WEBSOCKET_RX
-            syslog(LOG_DEBUG, "Received ws event %s", str.c_str());
-#endif
-
-            // Write it out
-            if (WS_TYPE_1 == pSession->getWsType()) {
-              str = ("E;") + str;
-              mg_ws_send(pSession->getConn(), (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-            }
-            else if (WS_TYPE_2 == pSession->getWsType()) {
-              std::string strEvent;
-              vscp_convertEventToJSON(strEvent, pEvent);
-              std::string str = vscp_str_format(WS2_EVENT, strEvent.c_str());
-              mg_ws_send(pSession->getConn(), (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-            }
-          }
-        }
-
-        // Remove the event
-        vscp_deleteEvent_v2(&pEvent);
-
-      } // Valid pEvent pointer
-
-    } // events available
-
-  } // for
-
+  // m_websocketSessions.push_back(pSession);
+  m_websocketSessionMap.insert(std::pair<unsigned long, CWebSockSession *>(id, pSession));
   pthread_mutex_unlock(&m_mutex_websocketSession);
+
+  // Use the session object as user data
+  // mg_set_user_connection_data(pSession->getConn(), (void *) pSession);
+
+  return pSession;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// removeSession
+//
+
+int
+CWebSockSrv::removeSession(unsigned long id)
+{
+  // Find the session
+  CWebSockSession *pSession = NULL;
+
+  pthread_mutex_lock(&m_mutex_websocketSession);
+  auto it = m_websocketSessionMap.find(id);
+  if (it != m_websocketSessionMap.end()) {
+    pSession = it->second;
+    m_websocketSessionMap.erase(it);
+  }
+  pthread_mutex_unlock(&m_mutex_websocketSession);
+
+  return VSCP_ERROR_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// getSession
+//
+
+CWebSockSession *
+CWebSockSrv::getSession(unsigned long id)
+{
+  CWebSockSession *pSession = NULL;
+
+  pthread_mutex_lock(&m_mutex_websocketSession);
+  auto it = m_websocketSessionMap.find(id);
+  if (it != m_websocketSessionMap.end()) {
+    pSession = it->second;
+  }
+  pthread_mutex_unlock(&m_mutex_websocketSession);
+
+  return pSession;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1321,7 +1448,7 @@ CWebSockSrv::postIncomingEvent(void)
 //   }
 
 //   mg_lock_context(ctx);
-//   websock_session *pSession = websock_new_session(conn);
+//   CWebSockSession *pSession = websock_new_session(conn);
 
 //   if (NULL != pSession) {
 //     reject = 0;
@@ -1333,7 +1460,7 @@ CWebSockSrv::postIncomingEvent(void)
 //   mg_unlock_context(ctx);
 
 #ifdef __VSCP_DEBUG_WEBSOCKET
-//     syslog(LOG_ERR, "[Websocket ws1] WS1 Connection: client %s", (reject ? "rejected" : "accepted"));
+//     spdlog::error( "[Websocket ws1] WS1 Connection: client %s", (reject ? "rejected" : "accepted"));
 #endif
 
 //   return reject;
@@ -1389,39 +1516,41 @@ CWebSockSrv::postIncomingEvent(void)
 // ws1_readyHandler
 //
 
-// void
-// CWebSockSrv::ws1_readyHandler(struct mg_connection *conn, void *cbdata)
-// {
-//   // Check pointers
-//   if (NULL == conn) {
-//     return;
-//   }
+void
+CWebSockSrv::ws1_readyHandler(struct mg_connection *conn, void *cbdata)
+{
+  // Check pointers
+  if (NULL == conn) {
+    return;
+  }
 
-//   CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
-//   if (NULL == pSession) {
-//     return;
-//   }
+  // No session data available yet in the conn object
+  // It will be set in the connect handler
+  CWebSockSession *pSession = (CWebSockSession *) cbdata; // conn->pfn_data;
+  if (NULL == pSession) {
+    return;
+  }
 
-//   if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED) {
-//     return;
-//   }
+  // if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED) {
+  //   return;
+  // }
 
-//   // Record activity
-//   pSession->lastActiveTime = time(NULL);
+  // Record activity
+  pSession->setLastActiveTime(time(NULL));
 
-//   // Start authentication
-//   std::string str = vscp_str_format(("+;AUTH0;%s"), pSession->m_sid);
-//   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+  // Start authentication
+  std::string str = vscp_str_format(("+;AUTH0;%s"), pSession->getSid());
+  mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-//   pSession->getConnState() = WEBSOCK_CONN_STATE_DATA;
-// }
+  pSession->setConnState(WEBSOCK_CONN_STATE_DATA);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // ws1_dataHandler
 //
 
 int
-CWebSockSrv::ws1_dataHandler(struct mg_connection *conn, int bits, char *data, size_t len, void *cbdata)
+CWebSockSrv::ws1_dataHandler(struct mg_connection *conn, struct mg_ws_message *wm/*, void *cbdata*/)
 {
   std::string strWsPkt;
 
@@ -1430,7 +1559,13 @@ CWebSockSrv::ws1_dataHandler(struct mg_connection *conn, int bits, char *data, s
     return VSCP_ERROR_ERROR;
   }
 
-  CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
+  CWebSockSrv *pWebSockSrv = (CWebSockSrv *) conn->fn_data;
+  if (NULL == pWebSockSrv) {
+    spdlog::error("websockWorkerThread: Invalid CWebSockSrv pointer.");
+    return VSCP_ERROR_ERROR;
+  }
+
+  CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
   if (NULL == pSession) {
     return VSCP_ERROR_ERROR;
   }
@@ -1442,88 +1577,57 @@ CWebSockSrv::ws1_dataHandler(struct mg_connection *conn, int bits, char *data, s
   // Record activity
   pSession->setLastActiveTime(time(NULL));
 
-  // switch (((unsigned char) bits) & 0x0F) {
+  switch (wm->flags & 0x0F) {
 
-  //   case MG_WEBSOCKET_OPCODE_CONTINUATION:
+    case WEBSOCKET_OP_CONTINUE:
 
-#ifdef __VSCP_DEBUG_WEBSOCKET_RX
-//    syslog(LOG_DEBUG, "Websocket WS1 - opcode = Continuation");
-#endif
-//       syslog(LOG_DEBUG, "Websocket WS1 - opcode = Continuation");
-//     }
+      spdlog::debug("Websocket WS1 - opcode = Continuation");
 
-//     // Save and concatenate message
-//     pSession->m_strConcatenated += std::string(data, len);
+      // Save and concatenate message parts
+      pSession->addConcatenatedString(wm->data);
+      break;
 
-//     // if last process is
-//     if (1 & bits) {
-//       try {
-//         if (!ws1_message(conn, pSession, pSession->m_strConcatenated)) {
-//           return VSCP_ERROR_ERROR;
-//         }
-//       }
-//       catch (...) {
-//         syslog(LOG_ERR, "ws1: Exception occurred ws1_message concat");
-//       }
-//     }
-//     break;
+      // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
+    case WEBSOCKET_OP_TEXT:
+      spdlog::debug("Websocket WS1 - opcode = text[%s]", strWsPkt.c_str());
+      if (wm->flags & WEBSOCKET_OP_FINAL) {
+        // Last part of message - get all parts
+        pSession->addConcatenatedString(wm->data);
+        strWsPkt = pSession->getConcatenatedString();
+        pSession->clearConcatenatedString();
+      }
+      else {
+        // Not last part - just add to existing parts
+        pSession->addConcatenatedString(wm->data);
+        return VSCP_ERROR_SUCCESS;
+      }
 
-//   // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
-//   case MG_WEBSOCKET_OPCODE_TEXT:
-#ifdef __VSCP_DEBUG_WEBSOCKET_RX
-//    syslog(LOG_DEBUG, "Websocket WS1 - opcode = text");
-#endif
-  //       syslog(LOG_DEBUG, "Websocket WS1 - opcode = text[%s]", strWsPkt.c_str());
-  //     }
-  //     if (1 & bits) {
-  //       try {
-  //         strWsPkt = std::string(data, len);
-  //         if (!ws1_message(conn, pSession, strWsPkt)) {
-  //           return VSCP_ERROR_ERROR;
-  //         }
-  //       }
-  //       catch (...) {
-  //         syslog(LOG_ERR, "ws1: Exception occurred ws1_message");
-  //       }
-  //     }
-  //     else {
-  //       // Store first part
-  //       pSession->m_strConcatenated = std::string(data, len);
-  //     }
-  //     break;
+      if (!ws1_message(conn, strWsPkt)) {
+        return VSCP_ERROR_ERROR;
+      }
+      break;
 
-  //   case MG_WEBSOCKET_OPCODE_BINARY:
-#ifdef __VSCP_DEBUG_WEBSOCKET
-  //       syslog(LOG_DEBUG, "Websocket WS1 - opcode = BINARY");
-#endif
-  //     break;
+    case WEBSOCKET_OP_BINARY:
+      spdlog::debug("Websocket WS1 - opcode = BINARY");
+      break;
 
-  //   case MG_WEBSOCKET_OPCODE_CONNECTION_CLOSE:
-#ifdef __VSCP_DEBUG_WEBSOCKET
-  //       syslog(LOG_DEBUG, "Websocket WS1 - opcode = Connection close");
-#endif
-  //     break;
+    case WEBSOCKET_OP_CLOSE:
+      spdlog::debug("Websocket WS1 - opcode = Connection close");
+      break;
 
-  //   case MG_WEBSOCKET_OPCODE_PING:
-#ifdef __VSCP_DEBUG_WEBSOCKET_PING
-  //       syslog(LOG_DEBUG, "Websocket WS1 - opcode = Ping");
-#endif
-  //     if (__VSCP_DEBUG_WEBSOCKET_PING) {
-  //       syslog(LOG_DEBUG, "Websocket WS1 - Ping received/Pong sent,");
-  //     }
-  //     // mg_ws_send(conn, MG_WEBSOCKET_OPCODE_PONG, NULL, 0, WEBSOCKET_OP_TEXT);
-  //     break;
+    case WEBSOCKET_OP_PING:
+      spdlog::debug("Websocket WS1 - opcode = Ping");
+      mg_ws_send(conn, NULL, 0, WEBSOCKET_OP_PONG);
+      break;
 
-  //   case MG_WEBSOCKET_OPCODE_PONG:
-#ifdef __VSCP_DEBUG_WEBSOCKET_PONG
-  //       syslog(LOG_DEBUG, "Websocket WS2 - Pong received/Pong sent,");
-#endif
-  //     // mg_ws_send(conn, MG_WEBSOCKET_OPCODE_PING, NULL, 0, WEBSOCKET_OP_TEXT);
-  //     break;
+    case WEBSOCKET_OP_PONG:
+      spdlog::debug("Websocket WS2 - Pong received/Pong sent,");
+      mg_ws_send(conn, NULL, 0, WEBSOCKET_OP_PING);
+      break;
 
-  //   default:
-  //     break;
-  // }
+    default:
+      break;
+  }
 
   return VSCP_ERROR_SUCCESS;
 }
@@ -1542,7 +1646,13 @@ CWebSockSrv::ws1_message(struct mg_connection *conn, std::string &strWsPkt)
     return false;
   }
 
-  CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
+  CWebSockSrv *pWebSockSrv = (CWebSockSrv *) conn->fn_data;
+  if (NULL == pWebSockSrv) {
+    spdlog::error("websockWorkerThread: Invalid CWebSockSrv pointer.");
+    return false;
+  }
+
+  CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
   if (NULL == pSession) {
     return false;
   }
@@ -1559,7 +1669,7 @@ CWebSockSrv::ws1_message(struct mg_connection *conn, std::string &strWsPkt)
         ws1_command(conn, strWsPkt);
       }
       catch (...) {
-        syslog(LOG_ERR, "ws1: Exception occurred ws1_command");
+        spdlog::error("ws1: Exception occurred ws1_command");
         str = vscp_str_format(("-;C;%d;%s"), (int) WEBSOCK_ERROR_GENERAL, WEBSOCK_STR_ERROR_GENERAL);
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
       }
@@ -1570,22 +1680,21 @@ CWebSockSrv::ws1_message(struct mg_connection *conn, std::string &strWsPkt)
     //              short) , GUID(16*byte), data(0-487 bytes) |
     case 'E': {
 
-      // Must be authorized to do this
-      if ((NULL == pSession->getClientItem()) || !pSession->getClientItem()->bAuthenticated) {
+      // Must be authorised to do this
+      if (pSession->isAuthenticated()) {
 
-        str = vscp_str_format(("-;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORIZED, WEBSOCK_STR_ERROR_NOT_AUTHORIZED);
+        str = vscp_str_format(("-;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORISED, WEBSOCK_STR_ERROR_NOT_AUTHORISED);
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-        syslog(LOG_ERR,
-               "[Websocket ws1] User [%s] is not "
-               "authorized.\n",
-               pSession->getClientItem()->m_pUserItem->getUserName().c_str());
+        spdlog::error("[Websocket ws1] User [%s] is not "
+                      "authorised.\n",
+                      pSession->getUserItem()->getUserName().c_str());
 
         return true;
       }
 
       // User must be allowed to send events
-      if (!(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_EVENT)) {
+      if (!(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_EVENT)) {
 
         str = vscp_str_format(("-;%d;%s"),
                               (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_DO_THAT,
@@ -1593,10 +1702,9 @@ CWebSockSrv::ws1_message(struct mg_connection *conn, std::string &strWsPkt)
 
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-        syslog(LOG_ERR,
-               "[Websocket ws1] User [%s] is not "
-               "allowed to send events.\n",
-               pSession->getClientItem()->m_pUserItem->getUserName().c_str());
+        spdlog::error("[Websocket ws1] User [%s] is not "
+                      "allowed to send events.\n",
+                      pSession->getUserItem()->getUserName().c_str());
 
         return true; // We still leave channel open
       }
@@ -1605,121 +1713,126 @@ CWebSockSrv::ws1_message(struct mg_connection *conn, std::string &strWsPkt)
       strWsPkt = vscp_str_right(strWsPkt, strWsPkt.length() - 2);
       vscpEventEx ex;
 
-      try {
-        if (vscp_convertStringToEventEx(&ex, strWsPkt)) {
+      if (vscp_convertStringToEventEx(&ex, strWsPkt)) {
 
-          // If GUID is all null give it GUID of interface
-          if (vscp_isGUIDEmpty(ex.GUID)) {
-            pSession->getClientItem()->m_guid.writeGUID(ex.GUID);
+        // If GUID is all null give it GUID of interface
+        if (vscp_isGUIDEmpty(ex.GUID)) {
+          pSession->getGuid()->writeGUID(ex.GUID);
+        }
+
+        // Is this user allowed to send events
+        if (!(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_EVENT)) {
+
+          str = vscp_str_format(("-;%d;%s"),
+                                (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT,
+                                WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT);
+
+          mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+
+          spdlog::error("[Websocket ws1] User [%s] is not "
+                        "allowed to send events.\n",
+                        pSession->getUserItem()->getUserName().c_str());
+
+          return true; // We still leave channel open
+        }
+
+        // Is user allowed to send CLASS1.PROTOCOL events
+        if ((VSCP_CLASS1_PROTOCOL == ex.vscp_class) && (VSCP_CLASS2_LEVEL1_PROTOCOL == ex.vscp_class) &&
+            !(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_L1CTRL_EVENT)) {
+
+          str = vscp_str_format(("-;%d;%s"),
+                                (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT,
+                                WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT);
+          mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+
+          spdlog::error("[Websocket ws1] User [%s] is not "
+                        "authorised to send CLASS1.PROTOCOL events.\n",
+                        pSession->getUserItem()->getUserName().c_str());
+
+          return true;
+        }
+
+        // Is user allowed to send CLASS2.PROTOCOL events
+        if ((VSCP_CLASS2_PROTOCOL == ex.vscp_class) &&
+            !(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_L2CTRL_EVENT)) {
+
+          str = vscp_str_format(("-;%d;%s"),
+                                (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT,
+                                WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT);
+          mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+
+          spdlog::error("[Websocket ws1] User [%s] is not "
+                        "authorised to send CLASS2.PROTOCOL events.\n",
+                        pSession->getUserItem()->getUserName().c_str());
+
+          return true;
+        }
+
+        // Is user allowed to send CLASS2.HLO events
+        if ((VSCP_CLASS2_HLO == ex.vscp_class) &&
+            !(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_HLO_EVENT)) {
+
+          str = vscp_str_format(("-;%d;%s"),
+                                (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT,
+                                WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT);
+          mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+
+          spdlog::error("[Websocket ws1] User [%s] is not "
+                        "authorised to send CLASS2.HLO events.\n",
+                        pSession->getUserItem()->getUserName().c_str());
+
+          return true;
+        }
+
+        // Check if this user is allowed to send this event
+        if (!pSession->getUserItem()->isUserAllowedToSendEvent(ex.vscp_class, ex.vscp_type)) {
+
+          str = vscp_str_format(("-;%d;%s"),
+                                (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT,
+                                WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT);
+
+          mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+
+          spdlog::error("[websocket ws1] User [%s] is not allowed to "
+                        "send event class=%d type=%d.",
+                        pSession->getUserItem()->getUserName().c_str(),
+                        ex.vscp_class,
+                        ex.vscp_type);
+
+          return true; // Keep connection open
+        }
+
+        ex.obid = conn->id; // Set the obid
+        if (VSCP_ERROR_SUCCESS == addEvent2ReceiveQueue(ex)) {
+          mg_ws_send(conn, (const char *) "+;EVENT", 7, WEBSOCKET_OP_TEXT);
+          spdlog::error("[websocket ws1] Sent ws1 event %s", strWsPkt.c_str());
+        }
+        else {
+          str = vscp_str_format(("-;%d;%s"), (int) WEBSOCK_ERROR_TX_BUFFER_FULL, WEBSOCK_STR_ERROR_TX_BUFFER_FULL);
+          mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+        }
+
+        // Send event to all other clients
+        for (struct mg_connection *wc = conn->mgr->conns; wc != NULL; wc = wc->next) {
+
+          if (wc == conn) {
+            continue; // Don't send it back to the sender
           }
 
-          // Is this user allowed to send events
-          if (!(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_EVENT)) {
-
-            str = vscp_str_format(("-;%d;%s"),
-                                  (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT,
-                                  WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT);
-
-            mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-
-            syslog(LOG_ERR,
-                   "[Websocket ws1] User [%s] is not "
-                   "allowed to send events.\n",
-                   pSession->getClientItem()->m_pUserItem->getUserName().c_str());
-
-            return true; // We still leave channel open
-          }
-
-          // Is user allowed to send CLASS1.PROTOCOL events
-          if ((VSCP_CLASS1_PROTOCOL == ex.vscp_class) && (VSCP_CLASS2_LEVEL1_PROTOCOL == ex.vscp_class) &&
-              !(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_L1CTRL_EVENT)) {
-
-            str = vscp_str_format(("-;%d;%s"),
-                                  (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT,
-                                  WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT);
-            mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-
-            syslog(LOG_ERR,
-                   "[Websocket ws1] User [%s] is not "
-                   "authorised to send CLASS1.PROTOCOL events.\n",
-                   pSession->getClientItem()->m_pUserItem->getUserName().c_str());
-
-            return true;
-          }
-
-          // Is user allowed to send CLASS2.PROTOCOL events
-          if ((VSCP_CLASS2_PROTOCOL == ex.vscp_class) &&
-              !(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_L2CTRL_EVENT)) {
-
-            str = vscp_str_format(("-;%d;%s"),
-                                  (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT,
-                                  WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT);
-            mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-
-            syslog(LOG_ERR,
-                   "[Websocket ws1] User [%s] is not "
-                   "authorised to send CLASS2.PROTOCOL events.\n",
-                   pSession->getClientItem()->m_pUserItem->getUserName().c_str());
-
-            return true;
-          }
-
-          // Is user allowed to send CLASS2.HLO events
-          if ((VSCP_CLASS2_HLO == ex.vscp_class) &&
-              !(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_HLO_EVENT)) {
-
-            str = vscp_str_format(("-;%d;%s"),
-                                  (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT,
-                                  WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT);
-            mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-
-            syslog(LOG_ERR,
-                   "[Websocket ws1] User [%s] is not "
-                   "authorised to send CLASS2.HLO events.\n",
-                   pSession->getClientItem()->m_pUserItem->getUserName().c_str());
-
-            return true;
-          }
-
-          // Check if this user is allowed to send this event
-          if (!pSession->getClientItem()->m_pUserItem->isUserAllowedToSendEvent(ex.vscp_class, ex.vscp_type)) {
-
-            str = vscp_str_format(("-;%d;%s"),
-                                  (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT,
-                                  WEBSOCK_ERROR_NOT_ALLOWED_TO_SEND_EVENT);
-
-            mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-
-            syslog(LOG_ERR,
-                   "[websocket ws1] User [%s] is not allowed to "
-                   "send event class=%d type=%d.",
-                   pSession->getClientItem()->m_pUserItem->getUserName().c_str(),
-                   ex.vscp_class,
-                   ex.vscp_type);
-
-            return true; // Keep connection open
-          }
-
-          ex.obid = pSession->getClientItem()->m_clientID;
-          if (sendEvent(conn, &ex)) {
-            mg_ws_send(conn, (const char *) "+;EVENT", 7, WEBSOCKET_OP_TEXT);
-#ifdef __VSCP_DEBUG_WEBSOCKET_TX
-            syslog(LOG_ERR, "[websocket ws1] Sent ws1 event %s", strWsPkt.c_str());
-#endif
-          }
-          else {
-            str = vscp_str_format(("-;%d;%s"), (int) WEBSOCK_ERROR_TX_BUFFER_FULL, WEBSOCK_STR_ERROR_TX_BUFFER_FULL);
-            mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+          if (NULL == wc->pfn_data) {
+            // Write it out
+            if (WS_TYPE_1 == pSession->getWsType()) {
+              std::string str;
+              if (vscp_convertEventExToString(str, &ex)) {
+                str = ("E;") + str;
+                mg_ws_send(wc, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+              }
+            }
           }
         }
       }
-      catch (...) {
-        syslog(LOG_ERR, "ws1: Exception occurred send event");
-        str = vscp_str_format(("-;E;%d;%s"), (int) WEBSOCK_ERROR_GENERAL, WEBSOCK_STR_ERROR_GENERAL);
-        mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-      }
-
-    } break;
+    } // 'E'
+    break;
 
     // Unknown command
     default:
@@ -1744,13 +1857,19 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
     return VSCP_ERROR_INVALID_POINTER;
   }
 
-  CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
+  CWebSockSrv *pWebSockSrv = (CWebSockSrv *) conn->fn_data;
+  if (NULL == pWebSockSrv) {
+    spdlog::error("websockWorkerThread: Invalid CWebSockSrv pointer.");
+    return VSCP_ERROR_ERROR;
+  }
+
+  CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
   if (NULL == pSession) {
-    return VSCP_ERROR_INVALID_POINTER;
+    return VSCP_ERROR_ERROR;
   }
 
 #ifdef __VSCP_DEBUG_WEBSOCKET
-  syslog(LOG_ERR, "[Websocket ws1] Command = %s", strCmd.c_str());
+  spdlog::error("[Websocket ws1] Command = %s", strCmd.c_str());
 #endif
 
   std::deque<std::string> tokens;
@@ -1784,7 +1903,7 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
   else if (vscp_startsWith(strTok, "CHALLENGE")) {
 
     // Send authentication challenge
-    if ((NULL == pSession->getClientItem()) || !pSession->getClientItem()->bAuthenticated) {
+    if (pSession->isAuthenticated()) {
 
       // Start authentication
       str = vscp_str_format(("+;AUTH0;%s"), pSession->getSid());
@@ -1808,19 +1927,18 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
       tokens.pop_front();
       if (authentication(conn, strIV, strCrypto)) {
         std::string userSettings;
-        pSession->getClientItem()->m_pUserItem->getAsString(userSettings);
+        pSession->getUserItem()->getAsString(userSettings);
         str = vscp_str_format(("+;AUTH1;%s"), (const char *) userSettings.c_str());
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
       }
       else {
-
-        str = vscp_str_format(("-;AUTH;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORIZED, WEBSOCK_STR_ERROR_NOT_AUTHORIZED);
+        str = vscp_str_format(("-;AUTH;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORISED, WEBSOCK_STR_ERROR_NOT_AUTHORISED);
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-        pSession->getClientItem()->bAuthenticated = false; // Authenticated
+        pSession->setAuthenticated(false); // not authenticated
       }
     }
     catch (...) {
-      syslog(LOG_ERR, "WS1: AUTH failed (syntax)");
+      spdlog::error("WS1: AUTH failed (syntax)");
       str = vscp_str_format(("-;AUTH;%d;%s"), (int) WEBSOCK_ERROR_SYNTAX_ERROR, WEBSOCK_STR_ERROR_SYNTAX_ERROR);
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
     }
@@ -1833,16 +1951,16 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
   else if (vscp_startsWith(strTok, "OPEN")) {
 
     // Must be authorised to do this
-    if ((NULL == pSession->getClientItem()) || !pSession->getClientItem()->bAuthenticated) {
+    if (pSession->isAuthenticated()) {
 
-      str = vscp_str_format(("-;OPEN;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORIZED, WEBSOCK_STR_ERROR_NOT_AUTHORIZED);
+      str = vscp_str_format(("-;OPEN;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORISED, WEBSOCK_STR_ERROR_NOT_AUTHORISED);
 
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
       return VSCP_ERROR_SUCCESS; // We still leave channel open
     }
 
-    pSession->getClientItem()->m_bOpen = true;
+    pSession->setOpen(true);
     mg_ws_send(conn, (const char *) "+;OPEN", 6, WEBSOCKET_OP_TEXT);
   }
 
@@ -1851,7 +1969,7 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
   //-------------------------------------------------------------------------
 
   else if (vscp_startsWith(strTok, "CLOSE")) {
-    pSession->getClientItem()->m_bOpen = false;
+    pSession->setOpen(false);
     mg_ws_send(conn, (const char *) "+;CLOSE", 7, WEBSOCKET_OP_TEXT);
   }
 
@@ -1864,20 +1982,20 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
     unsigned char ifGUID[16];
     memset(ifGUID, 0, 16);
 
-    // Must be authorized to do this
-    if ((NULL == pSession->getClientItem()) || !pSession->getClientItem()->bAuthenticated) {
+    // Must be authorised to do this
+    if (!pSession->isAuthenticated()) {
 
-      str = vscp_str_format(("-;SF;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORIZED, WEBSOCK_STR_ERROR_NOT_AUTHORIZED);
+      str = vscp_str_format(("-;SF;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORISED, WEBSOCK_STR_ERROR_NOT_AUTHORISED);
 
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-      syslog(LOG_ERR, "[Websocket ws1] User/host not authorized to set a filter.");
+      spdlog::error("[Websocket ws1] User/host not authorised to set a filter.");
 
       return VSCP_ERROR_SUCCESS; // We still leave channel open
     }
 
     // Check privilege
-    if (!(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_SETFILTER)) {
+    if (!(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_SETFILTER)) {
 
       str = vscp_str_format(("-;SF;%d;%s"),
                             (int) WEBSOCK_ERROR_NOT_ALLOWED_TO_DO_THAT,
@@ -1885,11 +2003,10 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
 
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-      syslog(LOG_ERR,
-             "[Websocket ws1] User [%s] not "
-             "allowed to set a filter.\n",
-             pSession->getClientItem()->m_pUserItem->getUserName().c_str());
-        return VSCP_ERROR_SUCCESS; // We still leave channel open
+      spdlog::error("[Websocket ws1] User [%s] not "
+                    "allowed to set a filter.\n",
+                    pSession->getUserItem()->getUserName().c_str());
+      return VSCP_ERROR_SUCCESS; // We still leave channel open
     }
 
     // Get filter
@@ -1898,18 +2015,18 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
       strTok = tokens.front();
       tokens.pop_front();
 
-      pthread_mutex_lock(&pSession->getClientItem()->m_mutexClientInputQueue);
-      if (!vscp_readFilterFromString(&pSession->getClientItem()->m_filter, strTok)) {
+      pthread_mutex_lock(&pSession->m_mutexInputQueue);
+      if (!vscp_readFilterFromString(&pSession->getFilter(), strTok)) {
 
         str = vscp_str_format(("-;SF;%d;%s"), (int) WEBSOCK_ERROR_SYNTAX_ERROR, WEBSOCK_STR_ERROR_SYNTAX_ERROR);
 
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-        pthread_mutex_unlock(&pSession->getClientItem()->m_mutexClientInputQueue);
+        pthread_mutex_unlock(&pSession->m_mutexInputQueue);
         return VSCP_ERROR_SUCCESS;
       }
 
-      pthread_mutex_unlock(&pSession->getClientItem()->m_mutexClientInputQueue);
+      pthread_mutex_unlock(&pSession->m_mutexInputQueue);
     }
     else {
 
@@ -1926,18 +2043,18 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
       strTok = tokens.front();
       tokens.pop_front();
 
-      pthread_mutex_lock(&pSession->getClientItem()->m_mutexClientInputQueue);
-      if (!vscp_readMaskFromString(&pSession->getClientItem()->m_filter, strTok)) {
+      pthread_mutex_lock(&pSession->m_mutexInputQueue);
+      if (!vscp_readMaskFromString(&pSession->getFilter(), strTok)) {
 
         str = vscp_str_format(("-;SF;%d;%s"), (int) WEBSOCK_ERROR_SYNTAX_ERROR, WEBSOCK_STR_ERROR_SYNTAX_ERROR);
 
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-        pthread_mutex_unlock(&pSession->getClientItem()->m_mutexClientInputQueue);
+        pthread_mutex_unlock(&pSession->m_mutexInputQueue);
         return VSCP_ERROR_SUCCESS;
       }
 
-      pthread_mutex_unlock(&pSession->getClientItem()->m_mutexClientInputQueue);
+      pthread_mutex_unlock(&pSession->m_mutexInputQueue);
     }
     else {
       str = vscp_str_format(("-;SF;%d;%s"), (int) WEBSOCK_ERROR_SYNTAX_ERROR, WEBSOCK_STR_ERROR_SYNTAX_ERROR);
@@ -1957,31 +2074,29 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
   // Clear the event queue
   else if (vscp_startsWith(strTok, "CLRQUEUE") || vscp_startsWith(strTok, "CLRQ")) {
 
-    // Must be authorized to do this
-    if ((NULL == pSession->getClientItem()) || !pSession->getClientItem()->bAuthenticated) {
+    // Must be authorised to do this
+    if (!pSession->isAuthenticated()) {
 
-      str = vscp_str_format(("-;CLRQ;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORIZED, WEBSOCK_STR_ERROR_NOT_AUTHORIZED);
+      str = vscp_str_format(("-;CLRQ;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORISED, WEBSOCK_STR_ERROR_NOT_AUTHORISED);
 
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-      syslog(LOG_ERR, "[Websocket ws1] User/host not authorized to clear the queue.");
+      spdlog::error("[Websocket ws1] User/host not authorised to clear the queue.");
 
       return VSCP_ERROR_SUCCESS; // We still leave channel open
     }
 
     std::deque<vscpEvent *>::iterator it;
-    pthread_mutex_lock(&pSession->getClientItem()->m_mutexClientInputQueue);
+    pthread_mutex_lock(&pSession->m_mutexInputQueue);
 
-    for (it = pSession->getClientItem()->m_clientInputQueue.begin();
-         it != pSession->getClientItem()->m_clientInputQueue.end();
-         ++it) {
-      vscpEvent *pEvent = pSession->getClientItem()->m_clientInputQueue.front();
-      pSession->getClientItem()->m_clientInputQueue.pop_front();
+    for (it = pSession->m_inputQueue.begin(); it != pSession->m_inputQueue.end(); ++it) {
+      vscpEvent *pEvent = *it;
+      pSession->m_inputQueue.pop_front();
       vscp_deleteEvent_v2(&pEvent);
     }
 
-    pSession->getClientItem()->m_clientInputQueue.clear();
-    pthread_mutex_unlock(&pSession->getClientItem()->m_mutexClientInputQueue);
+    pSession->m_inputQueue.clear();
+    pthread_mutex_unlock(&pSession->m_mutexInputQueue);
 
     mg_ws_send(conn, (const char *) "+;CLRQ", 6, WEBSOCKET_OP_TEXT);
   }
@@ -1995,13 +2110,13 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
     std::string strvalue;
 
     std::string strResult = ("+;VERSION;");
-    // strResult += VSCPD_DISPLAY_VERSION;
-    // strResult += (";");
-    // strResult += vscp_str_format(("%d.%d.%d.%d"),
-    //                              VSCPD_MAJOR_VERSION,
-    //                              VSCPD_MINOR_VERSION,
-    //                              VSCPD_RELEASE_VERSION,
-    //                              VSCPD_BUILD_VERSION);
+    strResult += VSCPL2DRV_WEBSOCKSRV_DISPLAY_VERSION;
+    strResult += (";");
+    strResult += vscp_str_format(("%d.%d.%d.%d"),
+                                 VSCPL2DRV_WEBSOCKSRV_VERSION,
+                                 VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION,
+                                 VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION,
+                                 VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION);
     // Positive reply
     mg_ws_send(conn, (const char *) strResult.c_str(), strResult.length(), WEBSOCKET_OP_TEXT);
   }
@@ -2011,13 +2126,19 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
   //-------------------------------------------------------------------------
 
   else if (vscp_startsWith(strTok, "COPYRIGHT")) {
-
     std::string strvalue;
 
     std::string strResult = ("+;COPYRIGHT;");
-    // strResult += VSCPD_COPYRIGHT;
+    strResult += VSCPL2DRV_WEBSOCKSRV_COPYRIGHT;
 
     // Positive reply
+    mg_ws_send(conn, (const char *) strResult.c_str(), strResult.length(), WEBSOCKET_OP_TEXT);
+  }
+  else {
+    std::string strResult = "-;";
+    strResult += strTok;
+    strResult += vscp_str_format(";%d;%s", (int) WEBSOCK_ERROR_UNKNOWN_COMMAND, WEBSOCK_STR_ERROR_UNKNOWN_COMMAND);
+
     mg_ws_send(conn, (const char *) strResult.c_str(), strResult.length(), WEBSOCKET_OP_TEXT);
   }
 
@@ -2035,77 +2156,64 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
 // int
 // CWebSockSrv::ws2_connectHandler(const struct mg_connection *conn, void *cbdata)
 // {
-//   struct mg_context *ctx = mg_get_context(conn);
-//   int reject             = 1;
+//   int reject = 1;
 
 //   // Check pointers
 //   if (NULL == conn) {
-//     return 1;
+//     return reject;
 //   }
 
-//   if (NULL == ctx) {
-//     return 1;
-//   }
-
-//   mg_lock_context(ctx);
-//   websock_session *pSession = websock_new_session(conn);
-
+//   CWebSockSession *pSession = new CWebSockSession();
 //   if (NULL != pSession) {
 //     reject = 0;
+//     return reject;
 //   }
 
 //   // This is a WS2 type connection
-//   pSession->m_wstypes = WS_TYPE_2;
+//   pSession->setWsType(WS_TYPE_2);
 
-//   mg_unlock_context(ctx);
-
-#ifdef __VSCP_DEBUG_WEBSOCKET
-//     syslog(LOG_ERR, "[Websocket ws2] WS2 Connection: client %s", (reject ? "rejected" : "accepted"));
-#endif
+//   spdlog::debug("[Websocket ws2] WS2 Connection: client %s", (reject ? "rejected" : "accepted"));
 
 //   return reject;
-//}
+// }
 
 ////////////////////////////////////////////////////////////////////////////////
 // ws2_closeHandler
 //
 
-// void
-// CWebSockSrv::ws2_closeHandler(const struct mg_connection *conn, void *cbdata)
-// {
-//   struct mg_context *ctx    = mg_get_context(conn);
-//   CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
+void
+CWebSockSrv::ws2_closeHandler(const struct mg_connection *conn, void *cbdata)
+{
+  if (NULL == conn) {
+    return;
+  }
 
-//   if (NULL == conn) {
-//     return;
-//   }
-//   if (NULL == pSession) {
-//     return;
-//   }
-//   if (pSession->getConn() != conn) {
-//     return;
-//   }
-//   if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED) {
-//     return;
-//   }
+  CWebSockSrv *pWebSockSrv = (CWebSockSrv *) conn->fn_data;
+  if (NULL == pWebSockSrv) {
+    spdlog::error("websockWorkerThread: Invalid CWebSockSrv pointer.");
+    return;
+  }
 
-//   mg_lock_context(ctx);
+  CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
+  if (NULL == pSession) {
+    return;
+  }
 
-//   // Record activity
-//   pSession->lastActiveTime = time(NULL);
+  if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED) {
+    return;
+  }
 
-//   pSession->getConnState() = WEBSOCK_CONN_STATE_NULL;
-//   pSession->getConn()       = NULL;
-//   m_clientList.removeClient(pSession->getClientItem());
-//   pSession->getClientItem() = NULL;
+  // Record activity
+  pSession->setLastActiveTime(time(NULL));
 
-//   pthread_mutex_lock(&m_mutex_websocketSession);
-//   m_websocketSessions.remove(pSession);
-//   delete pSession;
-//   pthread_mutex_unlock(&m_mutex_websocketSession);
+  pSession->setConnState(WEBSOCK_CONN_STATE_NULL);
+  pSession->setConnection(NULL);
 
-//   mg_unlock_context(ctx);
-// }
+  pthread_mutex_lock(&m_mutex_websocketSession);
+  removeSession(conn->id);
+  delete pSession;
+  pthread_mutex_unlock(&m_mutex_websocketSession);
+}
 
 #define WS2_AUTH0_TEMPLATE                                                                                             \
   "{"                                                                                                                  \
@@ -2117,50 +2225,51 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
 // ws2_readyHandler
 //
 
-// void
-// CWebSockSrv::ws2_readyHandler(struct mg_connection *conn, void *cbdata)
-// {
-//   CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
+void
+CWebSockSrv::ws2_readyHandler(struct mg_connection *conn, void *cbdata)
+{
+  // Check pointers
+  if (NULL == conn) {
+    return;
+  }
 
-//   // Check pointers
-//   if (NULL == conn) {
-//     return;
-//   }
+  CWebSockSrv *pWebSockSrv = (CWebSockSrv *) conn->fn_data;
+  if (NULL == pWebSockSrv) {
+    spdlog::error("websockWorkerThread: Invalid CWebSockSrv pointer.");
+    return;
+  }
 
-//   if (NULL == pSession) {
-//     return;
-//   }
+  CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
+  if (NULL == pSession) {
+    return;
+  }
 
-//   if (pSession->getConn() != conn) {
-//     return;
-//   }
+  if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED) {
+    return;
+  }
 
-//   if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED) {
-//     return;
-//   }
+  // Record activity
+  pSession->setLastActiveTime(time(NULL));
 
-//   // Record activity
-//   pSession->lastActiveTime = time(NULL);
+  // Start authentication
+  /* Auth0 response
+      {
+          "type" : "+"
+          "args" : ["AUTH0","%s"]
+      }
+  */
+  std::string str = vscp_str_format(WS2_AUTH0_TEMPLATE, pSession->getSid());
+  mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-//   // Start authentication
-//   /* Auth0 response
-//       {
-//           "type" : "+"
-//           "args" : ["AUTH0","%s"]
-//       }
-//   */
-//   std::string str = vscp_str_format(WS2_AUTH0_TEMPLATE, pSession->m_sid);
-//   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-
-//   pSession->getConnState() = WEBSOCK_CONN_STATE_DATA;
-// }
+  pSession->setConnState(WEBSOCK_CONN_STATE_DATA);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // ws2_dataHandler
 //
 
 int
-CWebSockSrv::ws2_dataHandler(struct mg_connection *conn, int bits, char *data, size_t len, void *cbdata)
+CWebSockSrv::ws2_dataHandler(struct mg_connection *conn, struct mg_ws_message *wm/*, void *cbdata*/)
 {
   std::string strWsPkt;
 
@@ -2169,7 +2278,13 @@ CWebSockSrv::ws2_dataHandler(struct mg_connection *conn, int bits, char *data, s
     return VSCP_ERROR_ERROR;
   }
 
-  CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
+  CWebSockSrv *pWebSockSrv = (CWebSockSrv *) conn->fn_data;
+  if (NULL == pWebSockSrv) {
+    spdlog::error("websockWorkerThread: Invalid CWebSockSrv pointer.");
+    return VSCP_ERROR_ERROR;
+  }
+
+  CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
   if (NULL == pSession) {
     return VSCP_ERROR_ERROR;
   }
@@ -2181,83 +2296,57 @@ CWebSockSrv::ws2_dataHandler(struct mg_connection *conn, int bits, char *data, s
   // Record activity
   pSession->setLastActiveTime(time(NULL));
 
-  //   switch (((unsigned char) bits) & 0x0F) {
+  switch (wm->flags & 0x0F) {
 
-  //     case MG_WEBSOCKET_OPCODE_CONTINUATION:
+    case WEBSOCKET_OP_CONTINUE:
 
-  // #ifdef __VSCP_DEBUG_WEBSOCKET
-  //       syslog(LOG_DEBUG, "Websocket WS2 - opcode = Continuation");
-  // #endif
+      spdlog::debug("Websocket WS2 - opcode = Continuation");
 
-  //       // Save and concatenate message
-  //       pSession->m_strConcatenated += std::string(data, len);
+      // Save and concatenate message parts
+      pSession->addConcatenatedString(wm->data);
+      break;
 
-  //       // if last process is
-  //       if (1 & bits) {
-  //         try {
-  //           if (!ws2_message(conn, pSession, pSession->m_strConcatenated)) {
-  //             return VSCP_ERROR_ERROR;
-  //           }
-  //         }
-  //         catch (...) {
-  //           syslog(LOG_ERR, "ws1: Exception occurred ws2_message concat");
-  //         }
-  //       }
-  //       break;
+    // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
+    case WEBSOCKET_OP_TEXT:
+      spdlog::debug("Websocket WS2 - opcode = text[%s]", strWsPkt.c_str());
+      if (wm->flags & WEBSOCKET_OP_FINAL) {
+        // Last part of message - get all parts
+        pSession->addConcatenatedString(wm->data);
+        strWsPkt = pSession->getConcatenatedString();
+        pSession->clearConcatenatedString();
+      }
+      else {
+        // Not last part - just add to existing parts
+        pSession->addConcatenatedString(wm->data);
+        return VSCP_ERROR_SUCCESS;
+      }
 
-  //     // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
-  //     case MG_WEBSOCKET_OPCODE_TEXT:
+      if (!ws2_message(conn, strWsPkt)) {
+        return VSCP_ERROR_ERROR;
+      }
+      break;
 
-  // #ifdef __VSCP_DEBUG_WEBSOCKET
-  //       syslog(LOG_DEBUG, "Websocket WS2 - opcode = Text [%s]", strWsPkt.c_str());
-  // #endif
+    case WEBSOCKET_OP_BINARY:
+      spdlog::debug("Websocket WS2 - opcode = BINARY");
+      break;
 
-  //       if (1 & bits) {
-  //         try {
-  //           strWsPkt = std::string(data, len);
-  //           if (!ws2_message(conn, pSession, strWsPkt)) {
-  //             return VSCP_ERROR_ERROR;
-  //           }
-  //         }
-  //         catch (...) {
-  //           syslog(LOG_ERR, "ws1: Exception occurred ws2_message");
-  //         }
-  //       }
-  //       else {
-  //         // Store first part
-  //         pSession->m_strConcatenated = std::string(data, len);
-  //       }
-  //       break;
+    case WEBSOCKET_OP_CLOSE:
+      spdlog::debug("Websocket WS2 - opcode = Connection close");
+      break;
 
-  //     case MG_WEBSOCKET_OPCODE_BINARY:
-  // #ifdef __VSCP_DEBUG_WEBSOCKET
-  //       syslog(LOG_DEBUG, "Websocket WS2 - opcode = BINARY");
-  // #endif
-  //       break;
+    case WEBSOCKET_OP_PING:
+      spdlog::debug("Websocket WS2 - opcode = Ping");
+      mg_ws_send(conn, NULL, 0, WEBSOCKET_OP_PONG);
+      break;
 
-  //     case MG_WEBSOCKET_OPCODE_CONNECTION_CLOSE:
-  // #ifdef __VSCP_DEBUG_WEBSOCKET
-  //       syslog(LOG_DEBUG, "Websocket WS2 - Connection close");
-  // #endif
-  //       break;
+    case WEBSOCKET_OP_PONG:
+      spdlog::debug("Websocket WS2 - Pong received/Pong sent,");
+      mg_ws_send(conn, NULL, 0, WEBSOCKET_OP_PING);
+      break;
 
-  //     case MG_WEBSOCKET_OPCODE_PING:
-  // #ifdef __VSCP_DEBUG_WEBSOCKET_PONG
-  //       syslog(LOG_DEBUG, "Websocket WS2 - Ping received/Pong sent,");
-  // #endif
-  //       // mg_ws_send(conn, MG_WEBSOCKET_OPCODE_PONG, data, len, WEBSOCKET_OP_TEXT);
-  //       break;
-
-  //     case MG_WEBSOCKET_OPCODE_PONG:
-  // #ifdef __VSCP_DEBUG_WEBSOCKET_PING
-  //       syslog(LOG_DEBUG, "Websocket WS2 - Pong received/Ping sent,");
-  // #endif
-  //       // mg_ws_send(conn, MG_WEBSOCKET_OPCODE_PING, data, len, WEBSOCKET_OP_TEXT);
-  //       break;
-
-  //     default:
-  //       break;
-  //   }
+    default:
+      break;
+  }
 
   return VSCP_ERROR_SUCCESS;
 }
@@ -2278,7 +2367,13 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
     return false;
   }
 
-  CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
+  CWebSockSrv *pWebSockSrv = (CWebSockSrv *) conn->fn_data;
+  if (NULL == pWebSockSrv) {
+    spdlog::error("websockWorkerThread: Invalid CWebSockSrv pointer.");
+    return false;
+  }
+
+  CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
   if (NULL == pSession) {
     return false;
   }
@@ -2326,7 +2421,7 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
           mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
           // No arg found
-          syslog(LOG_ERR, "Failed to parse ws2 websocket command object %s", strWsPkt.c_str());
+          spdlog::error("Failed to parse ws2 websocket command object %s", strWsPkt.c_str());
           return false;
         }
         catch (...) {
@@ -2336,7 +2431,7 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
                                             WEBSOCK_STR_ERROR_PARSE_FORMAT);
           mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-          syslog(LOG_ERR, "Failed to parse ws2 websocket command object %s", strWsPkt.c_str());
+          spdlog::error("Failed to parse ws2 websocket command object %s", strWsPkt.c_str());
 
           return false;
         }
@@ -2351,19 +2446,18 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
               str = it.value().dump();
 
               // Client must be authorised to send events
-              if ((NULL == pSession->getClientItem()) || !pSession->getClientItem()->bAuthenticated) {
+              if (!pSession->isAuthenticated()) {
 
                 str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                       "EVENT",
-                                      (int) WEBSOCK_ERROR_NOT_AUTHORIZED,
-                                      WEBSOCK_STR_ERROR_NOT_AUTHORIZED);
+                                      (int) WEBSOCK_ERROR_NOT_AUTHORISED,
+                                      WEBSOCK_STR_ERROR_NOT_AUTHORISED);
 
                 mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-                syslog(LOG_ERR,
-                       "[Websocket ws2] User [%s] is not "
-                       "allowed to login.\n",
-                       pSession->getClientItem()->m_pUserItem->getUserName().c_str());
+                spdlog::error("[Websocket ws2] User [%s] is not "
+                              "allowed to login.\n",
+                              pSession->getUserItem()->getUserName().c_str());
 
                 return false; // 'false' - Drop connection
               }
@@ -2373,11 +2467,11 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
 
                 // If GUID is all null give it GUID of interface
                 if (vscp_isGUIDEmpty(ex.GUID)) {
-                  pSession->getClientItem()->m_guid.writeGUID(ex.GUID);
+                  pSession->getGuid()->writeGUID(ex.GUID);
                 }
 
                 // Is this user allowed to send events
-                if (!(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_EVENT)) {
+                if (!(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_EVENT)) {
 
                   std::string str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                                     "EVENT",
@@ -2385,19 +2479,16 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
                                                     WEBSOCK_STR_ERROR_NOT_ALLOWED_TO_DO_THAT);
                   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-                  syslog(LOG_ERR,
-                         "[Websocket ws2] User [%s] is not "
-                         "allowed to send events.\n",
-                         pSession->getClientItem()->m_pUserItem->getUserName().c_str());
+                  spdlog::error("[Websocket ws2] User [%s] is not "
+                                "allowed to send events.\n",
+                                pSession->getUserItem()->getUserName().c_str());
 
                   return true; // 'true' leave connection open
                 }
 
-                // Is user allowed to send CLASS1.PROTOCOL
-                // events
+                // Is user allowed to send CLASS1.PROTOCOLevents
                 if ((VSCP_CLASS1_PROTOCOL == ex.vscp_class) && (VSCP_CLASS2_LEVEL1_PROTOCOL == ex.vscp_class) &&
-                    !(pSession->getClientItem()->m_pUserItem->getUserRights() &
-                      VSCP_USER_RIGHT_ALLOW_SEND_L1CTRL_EVENT)) {
+                    !(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_L1CTRL_EVENT)) {
 
                   std::string str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                                     "EVENT",
@@ -2405,20 +2496,17 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
                                                     WEBSOCK_STR_ERROR_NOT_ALLOWED_TO_DO_THAT);
                   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-                  syslog(LOG_ERR,
-                         "[Websocket ws2] User [%s] is not "
-                         "authorised to send CLASS1.PROTOCOL "
-                         "events.\n",
-                         pSession->getClientItem()->m_pUserItem->getUserName().c_str());
+                  spdlog::error("[Websocket ws2] User [%s] is not "
+                                "authorised to send CLASS1.PROTOCOL "
+                                "events.\n",
+                                pSession->getUserItem()->getUserName().c_str());
 
                   return true; // 'true' leave connection open
                 }
 
-                // Is user allowed to send CLASS2.PROTOCOL
-                // events
+                // Is user allowed to send CLASS2.PROTOCOL events
                 if ((VSCP_CLASS2_PROTOCOL == ex.vscp_class) &&
-                    !(pSession->getClientItem()->m_pUserItem->getUserRights() &
-                      VSCP_USER_RIGHT_ALLOW_SEND_L2CTRL_EVENT)) {
+                    !(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_L2CTRL_EVENT)) {
 
                   std::string str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                                     "EVENT",
@@ -2426,18 +2514,17 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
                                                     WEBSOCK_STR_ERROR_NOT_ALLOWED_TO_DO_THAT);
                   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-                  syslog(LOG_ERR,
-                         "[Websocket ws2] User [%s] is not "
-                         "authorized to send CLASS2.PROTOCOL "
-                         "events.\n",
-                         pSession->getClientItem()->m_pUserItem->getUserName().c_str());
+                  spdlog::error("[Websocket ws2] User [%s] is not "
+                                "authorised to send CLASS2.PROTOCOL "
+                                "events.\n",
+                                pSession->getUserItem()->getUserName().c_str());
 
                   return true; // 'true' leave connection open
                 }
 
                 // Is user allowed to send CLASS2.HLO events
                 if ((VSCP_CLASS2_HLO == ex.vscp_class) &&
-                    !(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_HLO_EVENT)) {
+                    !(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_SEND_HLO_EVENT)) {
 
                   std::string str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                                     "EVENT",
@@ -2445,18 +2532,16 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
                                                     WEBSOCK_STR_ERROR_NOT_ALLOWED_TO_DO_THAT);
                   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-                  syslog(LOG_ERR,
-                         "[Websocket ws2] User [%s] is not "
-                         "authorised to send CLASS2.HLO "
-                         "events.\n",
-                         pSession->getClientItem()->m_pUserItem->getUserName().c_str());
+                  spdlog::error("[Websocket ws2] User [%s] is not "
+                                "authorised to send CLASS2.HLO "
+                                "events.\n",
+                                pSession->getUserItem()->getUserName().c_str());
 
                   return true; // 'true' leave connection open
                 }
 
-                // Check if this user is allowed to send this
-                // event
-                if (!pSession->getClientItem()->m_pUserItem->isUserAllowedToSendEvent(ex.vscp_class, ex.vscp_type)) {
+                // Check if this user is allowed to send this event
+                if (!pSession->getUserItem()->isUserAllowedToSendEvent(ex.vscp_class, ex.vscp_type)) {
 
                   std::string str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                                     "EVENT",
@@ -2464,38 +2549,52 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
                                                     WEBSOCK_STR_ERROR_NOT_ALLOWED_TO_DO_THAT);
                   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-                  syslog(LOG_ERR,
-                         "websocket] User [%s] is not allowed to "
-                         "send event class=%d type=%d.",
-                         pSession->getClientItem()->m_pUserItem->getUserName().c_str(),
-                         ex.vscp_class,
-                         ex.vscp_type);
+                  spdlog::error("websocket ws2] User [%s] is not allowed to "
+                                "send event class=%d type=%d.",
+                                pSession->getUserItem()->getUserName().c_str(),
+                                ex.vscp_class,
+                                ex.vscp_type);
 
                   return true; // 'true' leave connection open
                 }
 
-                ex.obid = pSession->getClientItem()->m_clientID;
-                if (sendEvent(conn, &ex)) {
+                ex.obid      = conn->id;             // Set the obid
+                ex.timestamp = vscp_makeTimeStamp(); // Set timestamp
 
+                // Put event on input queue of client
+                if (VSCP_ERROR_SUCCESS == addEvent2ReceiveQueue(ex)) {
                   str = vscp_str_format(WS2_POSITIVE_RESPONSE, "EVENT", "null");
                   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-
-#ifdef __VSCP_DEBUG_WEBSOCKET_TX
-                  syslog(LOG_ERR, "Sent ws2 event %s", strWsPkt.c_str());
-#endif
+                  spdlog::debug("Sent ws2 event %s", strWsPkt.c_str());
                 }
                 else {
-
                   str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                         "EVENT",
                                         (int) WEBSOCK_ERROR_TX_BUFFER_FULL,
                                         WEBSOCK_STR_ERROR_TX_BUFFER_FULL);
                   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-                  syslog(LOG_ERR, "Transmission buffer is full %s", strWsPkt.c_str());
-
+                  spdlog::error("Transmission buffer is full %s", strWsPkt.c_str());
                   return true; // 'true' leave connection open
                 }
-              }
+
+                // Sent to all other clients
+                for (struct mg_connection *wc = conn->mgr->conns; wc != NULL; wc = wc->next) {
+
+                  if (wc == conn) {
+                    continue; // Don't send it back to the sender
+                  }
+
+                  if (NULL == wc->pfn_data) {
+                    // Write it out
+                    if (WS_TYPE_2 == pSession->getWsType()) {
+                      std::string str;
+                      if (vscp_convertEventExToJSON(str, &ex)) {
+                        mg_ws_send(wc, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+                      }
+                    }
+                  }
+                }
+              } // convert from JSON
             }
           }
         }
@@ -2504,11 +2603,11 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
             vscp_str_format(WS2_NEGATIVE_RESPONSE, "EVENT", WEBSOCK_ERROR_PARSE_FORMAT, WEBSOCK_STR_ERROR_PARSE_FORMAT);
           mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-          syslog(LOG_ERR, "Failed to parse ws2 websocket event object %s", strWsPkt.c_str());
+          spdlog::error("Failed to parse ws2 websocket event object %s", strWsPkt.c_str());
 
           return true; // 'true' leave connection open
         }
-      }
+      } // 'E'
       // Positive response
       else if ("+" == str) {
         msg.m_type = MSG_TYPE_RESPONSE_POSITIVE;
@@ -2526,7 +2625,7 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
             vscp_str_format(WS2_NEGATIVE_RESPONSE, "EVENT", WEBSOCK_ERROR_PARSE_FORMAT, WEBSOCK_STR_ERROR_PARSE_FORMAT);
           mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-          syslog(LOG_ERR, "Failed to parse ws2 websocket + response object %s", strWsPkt.c_str());
+          spdlog::error("Failed to parse ws2 websocket + response object %s", strWsPkt.c_str());
           return true; // 'true' leave connection open
         }
       }
@@ -2547,7 +2646,7 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
             vscp_str_format(WS2_NEGATIVE_RESPONSE, "EVENT", WEBSOCK_ERROR_PARSE_FORMAT, WEBSOCK_STR_ERROR_PARSE_FORMAT);
           mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-          syslog(LOG_ERR, "Failed to parse ws2 websocket - response object %s", strWsPkt.c_str());
+          spdlog::error("Failed to parse ws2 websocket - response object %s", strWsPkt.c_str());
           return true; // 'true' leave connection open
         }
       }
@@ -2568,7 +2667,7 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
             vscp_str_format(WS2_NEGATIVE_RESPONSE, "EVENT", WEBSOCK_ERROR_PARSE_FORMAT, WEBSOCK_STR_ERROR_PARSE_FORMAT);
           mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-          syslog(LOG_ERR, "Failed to parse ws2 websocket variable object %s", strWsPkt.c_str());
+          spdlog::error("Failed to parse ws2 websocket variable object %s", strWsPkt.c_str());
           return true; // 'true' leave connection open
         }
       }
@@ -2578,7 +2677,7 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
         // This is a type we do not recognize
-        syslog(LOG_ERR, "Unknown ws2 websocket type %s", strWsPkt.c_str());
+        spdlog::error("Unknown ws2 websocket type %s", strWsPkt.c_str());
         return true; // 'true' leave connection open
       }
     }
@@ -2588,7 +2687,7 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
       vscp_str_format(WS2_NEGATIVE_RESPONSE, "EVENT", WEBSOCK_ERROR_UNKNOWN_TYPE, WEBSOCK_STR_ERROR_UNKNOWN_TYPE);
     mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-    syslog(LOG_ERR, "Failed to parse ws2 websocket command %s", strWsPkt.c_str());
+    spdlog::error("Failed to parse ws2 websocket command %s", strWsPkt.c_str());
     return true; // 'true' leave connection open
   }
 
@@ -2607,14 +2706,18 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
     return false;
   }
 
-  CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
+  CWebSockSrv *pWebSockSrv = (CWebSockSrv *) conn->fn_data;
+  if (NULL == pWebSockSrv) {
+    spdlog::error("websockWorkerThread: Invalid CWebSockSrv pointer.");
+    return false;
+  }
+
+  CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
   if (NULL == pSession) {
     return false;
   }
 
-#ifdef __VSCP_DEBUG_WEBSOCKET
-  syslog(LOG_DEBUG, "[Websocket ws2] Command = %s", strCmd.c_str());
-#endif
+  spdlog::debug("[Websocket ws2] Command = %s", strCmd.c_str());
 
   // Get arguments
   std::map<std::string, std::string> argmap;
@@ -2632,7 +2735,7 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
                                       WEBSOCK_STR_ERROR_PARSE_FORMAT);
     mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-    syslog(LOG_ERR, "[Websocket ws2] SETFILTER parse error = %s", jsonObj.dump().c_str());
+    spdlog::error("[Websocket ws2] SETFILTER parse error = %s", jsonObj.dump().c_str());
 
     return false;
   }
@@ -2654,7 +2757,7 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
   else if ("CHALLENGE" == strCmd) {
 
     // Send authentication challenge
-    if ((NULL == pSession->getClientItem()) || !pSession->getClientItem()->bAuthenticated) {
+    if (!pSession->isAuthenticated()) {
 
       // Start authentication
       std::string strSessionId = vscp_str_format("{\"sid\": \"%s\"}", pSession->getSid());
@@ -2676,18 +2779,17 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
     std::string strCrypto = argmap["crypto"];
     if (authentication(conn, strIV, strCrypto)) {
       std::string userSettings;
-      pSession->getClientItem()->m_pUserItem->getAsString(userSettings);
+      pSession->getUserItem()->getAsString(userSettings);
       str = vscp_str_format(WS2_POSITIVE_RESPONSE, "AUTH", "null");
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
     }
     else {
-
       str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                             "AUTH",
-                            (int) WEBSOCK_ERROR_NOT_AUTHORIZED,
-                            WEBSOCK_STR_ERROR_NOT_AUTHORIZED);
+                            (int) WEBSOCK_ERROR_NOT_AUTHORISED,
+                            WEBSOCK_STR_ERROR_NOT_AUTHORISED);
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-      pSession->getClientItem()->bAuthenticated = false; // Authenticated
+      pSession->setAuthenticated(false); // Not authenticated
     }
   }
 
@@ -2697,20 +2799,20 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
 
   else if ("OPEN" == strCmd) {
 
-    // Must be authorized to do this
-    if ((NULL == pSession->getClientItem()) || !pSession->getClientItem()->bAuthenticated) {
+    // Must be authorised to do this
+    if (!pSession->isAuthenticated()) {
 
       std::string str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                         "OPEN",
-                                        (int) WEBSOCK_ERROR_NOT_AUTHORIZED,
-                                        WEBSOCK_STR_ERROR_NOT_AUTHORIZED);
+                                        (int) WEBSOCK_ERROR_NOT_AUTHORISED,
+                                        WEBSOCK_STR_ERROR_NOT_AUTHORISED);
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
       return false; // We still leave channel open
     }
 
-    pSession->getClientItem()->m_bOpen = true;
-    std::string str                    = vscp_str_format(WS2_POSITIVE_RESPONSE, "OPEN", "null");
+    pSession->setOpen(true);
+    std::string str = vscp_str_format(WS2_POSITIVE_RESPONSE, "OPEN", "null");
     mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
   }
 
@@ -2719,8 +2821,8 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
   //-------------------------------------------------------------------------
 
   else if ("CLOSE" == strCmd) {
-    pSession->getClientItem()->m_bOpen = false;
-    std::string str                    = vscp_str_format(WS2_POSITIVE_RESPONSE, "CLOSE", "null");
+    pSession->setOpen(false);
+    std::string str = vscp_str_format(WS2_POSITIVE_RESPONSE, "CLOSE", "null");
     mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
   }
 
@@ -2734,22 +2836,22 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
     unsigned char ifGUID[16];
     memset(ifGUID, 0, 16);
 
-    // Must be authorized to do this
-    if ((NULL == pSession->getClientItem()) || !pSession->getClientItem()->bAuthenticated) {
+    // Must be authorised to do this
+    if (!pSession->isAuthenticated()) {
 
       std::string str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                         strCmd.c_str(),
-                                        (int) WEBSOCK_ERROR_NOT_AUTHORIZED,
-                                        WEBSOCK_STR_ERROR_NOT_AUTHORIZED);
+                                        (int) WEBSOCK_ERROR_NOT_AUTHORISED,
+                                        WEBSOCK_STR_ERROR_NOT_AUTHORISED);
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-      syslog(LOG_ERR, "[Websocket w2] User/host is not authorised to set a filter.");
+      spdlog::error("[Websocket w2] User/host is not authorised to set a filter.");
 
       return false; // We still leave channel open
     }
 
     // Check privilege
-    if (!(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_SETFILTER)) {
+    if (!(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_SETFILTER)) {
 
       std::string str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                         strCmd.c_str(),
@@ -2757,10 +2859,9 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
                                         WEBSOCK_STR_ERROR_NOT_ALLOWED_TO_DO_THAT);
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-      syslog(LOG_ERR,
-             "[Websocket w2] User [%s] is not "
-             "allowed to set a filter.\n",
-             pSession->getClientItem()->m_pUserItem->getUserName().c_str());
+      spdlog::error("[Websocket w2] User [%s] is not "
+                    "allowed to set a filter.\n",
+                    pSession->getUserItem()->getUserName().c_str());
       return false; // We still leave channel open
     }
 
@@ -2769,8 +2870,8 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
 
       strFilter = jsonObj.dump();
 
-      pthread_mutex_lock(&pSession->getClientItem()->m_mutexClientInputQueue);
-      if (!vscp_readFilterMaskFromJSON(&pSession->getClientItem()->m_filter, strFilter)) {
+      pthread_mutex_lock(&pSession->m_mutexInputQueue);
+      if (!vscp_readFilterMaskFromJSON(&pSession->getFilter(), strFilter)) {
 
         std::string str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                           strCmd.c_str(),
@@ -2778,13 +2879,13 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
                                           WEBSOCK_STR_ERROR_SYNTAX_ERROR);
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-        syslog(LOG_ERR, "[Websocket w2] Set filter syntax error. [%s]", strFilter.c_str());
+        spdlog::error("[Websocket w2] Set filter syntax error. [%s]", strFilter.c_str());
 
-        pthread_mutex_unlock(&pSession->getClientItem()->m_mutexClientInputQueue);
+        pthread_mutex_unlock(&pSession->m_mutexInputQueue);
         return false;
       }
 
-      pthread_mutex_unlock(&pSession->getClientItem()->m_mutexClientInputQueue);
+      pthread_mutex_unlock(&pSession->m_mutexInputQueue);
     }
     else {
 
@@ -2794,7 +2895,7 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
                                         WEBSOCK_STR_ERROR_SYNTAX_ERROR);
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-      syslog(LOG_ERR, "[Websocket w2] Set filter syntax error. [%s]", strFilter.c_str());
+      spdlog::error("[Websocket w2] Set filter syntax error. [%s]", strFilter.c_str());
 
       return false;
     }
@@ -2812,32 +2913,30 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
   else if (("CLRQUEUE" == strCmd) || ("CLRQ" == strCmd)) {
 
     // Must be authorised to do this
-    if ((NULL == pSession->getClientItem()) || !pSession->getClientItem()->bAuthenticated) {
+    if (!pSession->isAuthenticated()) {
 
       std::string str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
                                         strCmd.c_str(),
-                                        (int) WEBSOCK_ERROR_NOT_AUTHORIZED,
-                                        WEBSOCK_STR_ERROR_NOT_AUTHORIZED);
+                                        (int) WEBSOCK_ERROR_NOT_AUTHORISED,
+                                        WEBSOCK_STR_ERROR_NOT_AUTHORISED);
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
-      syslog(LOG_ERR, "[Websocket w2] User/host is not authorised to clear the queue.");
+      spdlog::error("[Websocket w2] User/host is not authorised to clear the queue.");
 
       return false; // We still leave channel open
     }
 
     std::deque<vscpEvent *>::iterator it;
-    pthread_mutex_lock(&pSession->getClientItem()->m_mutexClientInputQueue);
+    pthread_mutex_lock(&pSession->m_mutexInputQueue);
 
-    for (it = pSession->getClientItem()->m_clientInputQueue.begin();
-         it != pSession->getClientItem()->m_clientInputQueue.end();
-         ++it) {
-      vscpEvent *pEvent = pSession->getClientItem()->m_clientInputQueue.front();
-      pSession->getClientItem()->m_clientInputQueue.pop_front();
+    for (it = pSession->m_inputQueue.begin(); it != pSession->m_inputQueue.end(); ++it) {
+      vscpEvent *pEvent = pSession->m_inputQueue.front();
+      pSession->m_inputQueue.pop_front();
       vscp_deleteEvent_v2(&pEvent);
     }
 
-    pSession->getClientItem()->m_clientInputQueue.clear();
-    pthread_mutex_unlock(&pSession->getClientItem()->m_mutexClientInputQueue);
+    pSession->m_inputQueue.clear();
+    pthread_mutex_unlock(&pSession->m_mutexInputQueue);
 
     std::string str = vscp_str_format(WS2_POSITIVE_RESPONSE, strCmd.c_str(), "null");
     mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
@@ -2870,7 +2969,7 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
     std::string strvalue;
 
     std::string strResult = ("{ \"copyright\" : \"");
-    //strResult += VSCPD_COPYRIGHT;
+    // strResult += VSCPD_COPYRIGHT;
     strResult += "\" }";
 
     // Positive reply
@@ -2882,7 +2981,7 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
                                       strCmd,
                                       (int) WEBSOCK_ERROR_UNKNOWN_COMMAND,
                                       WEBSOCK_STR_ERROR_UNKNOWN_COMMAND);
-    syslog(LOG_ERR, "[Websocket w2] Unknown command [%s].", strCmd.c_str());
+    spdlog::error("[Websocket w2] Unknown command [%s].", strCmd.c_str());
 
     return false;
   }
@@ -2905,13 +3004,19 @@ CWebSockSrv::ws2_xcommand(struct mg_connection *conn, std::string &strCmd)
     return VSCP_ERROR_INVALID_POINTER;
   }
 
-  CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
+  CWebSockSrv *pWebSockSrv = (CWebSockSrv *) conn->fn_data;
+  if (NULL == pWebSockSrv) {
+    spdlog::error("websockWorkerThread: Invalid CWebSockSrv pointer.");
+    return VSCP_ERROR_ERROR;
+  }
+
+  CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
   if (NULL == pSession) {
     return VSCP_ERROR_INVALID_POINTER;
   }
 
 #ifdef __VSCP_DEBUG_WEBSOCKET
-  syslog(LOG_ERR, "[Websocket ws2] Command = %s", strCmd.c_str());
+  spdlog::error("[Websocket ws2] Command = %s", strCmd.c_str());
 #endif
 
   std::deque<std::string> tokens;
@@ -2945,150 +3050,208 @@ CWebSockSrv::ws2_xcommand(struct mg_connection *conn, std::string &strCmd)
 // websocket_post_incomingEvent
 //
 
-int
-CWebSockSrv::websock_post_incomingEvents(void)
-{
-  //   pthread_mutex_lock(&gpobj->m_mutex_websocketSession);
+// int
+// CWebSockSrv::websock_post_incomingEvents(void)
+// {
+//   pthread_mutex_lock(&gpobj->m_mutex_websocketSession);
 
-  //   std::list<websock_session *>::iterator iter;
-  //   for (iter = gpobj->m_websocketSessions.begin(); iter != gpobj->m_websocketSessions.end(); ++iter) {
+//   std::list<CWebSockSession *>::iterator iter;
+//   for (iter = gpobj->m_websocketSessions.begin(); iter != gpobj->m_websocketSessions.end(); ++iter) {
 
-  //     websock_session *pSession = *iter;
-  //     if (NULL == pSession) {
-  //       continue;
-  //     }
+//     CWebSockSession *pSession = *iter;
+//     if (NULL == pSession) {
+//       continue;
+//     }
 
-  //     // Should be a client item... hmm.... client disconnected
-  //     if (NULL == pSession->getClientItem()) {
-  //       continue;
-  //     }
+//     // Should be a client item... hmm.... client disconnected
+//     if (NULL == pSession->getClientItem()) {
+//       continue;
+//     }
 
-  //     if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED)
-  //       continue;
+//     if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED)
+//       continue;
 
-  //     if (NULL == pSession->getConn())
-  //       continue;
+//     if (pSession->getClientItem()->m_bOpen && pSession->getClientItem().size()) {
 
-  //     if (pSession->getClientItem()->m_bOpen && pSession->getClientItem()->m_clientInputQueue.size()) {
+//       vscpEvent *pEvent;
+//       pthread_mutex_lock(&pSession->m_mutexInputQueue);
+//       pEvent = pSession->getClientItem().front();
+//       pSession->getClientItem().pop_front();
+//       pthread_mutex_unlock(&pSession->m_mutexInputQueue);
+//       if (NULL != pEvent) {
 
-  //       vscpEvent *pEvent;
-  //       pthread_mutex_lock(&pSession->getClientItem()->m_mutexClientInputQueue);
-  //       pEvent = pSession->getClientItem()->m_clientInputQueue.front();
-  //       pSession->getClientItem()->m_clientInputQueue.pop_front();
-  //       pthread_mutex_unlock(&pSession->getClientItem()->m_mutexClientInputQueue);
-  //       if (NULL != pEvent) {
+//         // Run event through filter
+//         if (vscp_doLevel2Filter(pEvent, &pSession->getClientItem()->m_filter)) {
 
-  //         // Run event through filter
-  //         if (vscp_doLevel2Filter(pEvent, &pSession->getClientItem()->m_filter)) {
+//           // User must be authorised to receive events
+//           if (!(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_RCV_EVENT)) {
+//             continue;
+//           }
 
-  //           // User must be authorized to receive events
-  //           if (!(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_RCV_EVENT)) {
-  //             continue;
-  //           }
+//           std::string str;
+//           if (vscp_convertEventToString(str, pEvent)) {
 
-  //           std::string str;
-  //           if (vscp_convertEventToString(str, pEvent)) {
+//             spdlog::debug("Received ws event %s", str.c_str());
 
-  // #ifdef __VSCP_DEBUG_WEBSOCKET_RX
-  //             syslog(LOG_DEBUG, "Received ws event %s", str.c_str());
-  // #endif
+//             // Write it out
+//             if (WS_TYPE_1 == pSession->m_wstypes) {
+//               str = ("E;") + str;
+//               //mg_websocket_write(pSession->getConn(), (const char *) str.c_str(), str.length());
+//             }
+//             else if (WS_TYPE_2 == pSession->m_wstypes) {
+//               std::string strEvent;
+//               vscp_convertEventToJSON(strEvent, pEvent);
+//               std::string str = vscp_str_format(WS2_EVENT, strEvent.c_str());
+//               //mg_websocket_write(pSession->getConn(), (const char *) str.c_str(), str.length());
+//             }
+//           }
+//         }
 
-  //             // Write it out
-  //             if (WS_TYPE_1 == pSession->m_wstypes) {
-  //               str = ("E;") + str;
-  //               //mg_websocket_write(pSession->getConn(), (const char *) str.c_str(), str.length());
-  //             }
-  //             else if (WS_TYPE_2 == pSession->m_wstypes) {
-  //               std::string strEvent;
-  //               vscp_convertEventToJSON(strEvent, pEvent);
-  //               std::string str = vscp_str_format(WS2_EVENT, strEvent.c_str());
-  //               //mg_websocket_write(pSession->getConn(), (const char *) str.c_str(), str.length());
-  //             }
-  //           }
-  //         }
+//         // Remove the event
+//         vscp_deleteEvent_v2(&pEvent);
 
-  //         // Remove the event
-  //         vscp_deleteEvent_v2(&pEvent);
+//       } // Valid pEvent pointer
 
-  //       } // Valid pEvent pointer
+//     } // events available
 
-  //     } // events available
+//   } // for
 
-  //   } // for
-
-  //   pthread_mutex_unlock(&gpobj->m_mutex_websocketSession);
-  return VSCP_ERROR_SUCCESS;
-}
+//   pthread_mutex_unlock(&gpobj->m_mutex_websocketSession);
+// return VSCP_ERROR_SUCCESS;
+//}
 
 ///////////////////////////////////////////////////////////////////////////////
 // sendEventAllClients
 //
 
-void
-CWebSockSrv::sendEventAllClients(const vscpEvent *pEvent)
-{
-  if (NULL == pEvent) {
-    return;
-  }
+// int
+// CWebSockSrv::sendEventAllClients(const vscpEvent *pEvent)
+// {
+//   if (NULL == pEvent) {
+//     return VSCP_ERROR_INVALID_POINTER;
+//   }
 
-  // pthread_mutex_lock(&gpobj->m_mutex_websocketSession);
+//   // pthread_mutex_lock(&gpobj->m_mutex_websocketSession);
 
-  //   std::list<websock_session *>::iterator iter;
-  //   for (iter = gpobj->m_websocketSessions.begin(); iter != gpobj->m_websocketSessions.end(); ++iter) {
+//   //   std::list<CWebSockSession *>::iterator iter;
+//   //   for (iter = gpobj->m_websocketSessions.begin(); iter != gpobj->m_websocketSessions.end(); ++iter) {
 
-  //     websock_session *pSession = *iter;
-  //     if (NULL == pSession) {
-  //       continue;
-  //     }
+//   //     CWebSockSession *pSession = *iter;
+//   //     if (NULL == pSession) {
+//   //       continue;
+//   //     }
 
-  //     // Should be a client item... hmm.... client disconnected
-  //     if (NULL == pSession->getClientItem()) {
-  //       continue;
-  //     }
+//   //     // Should be a client item... hmm.... client disconnected
+//   //     if (NULL == pSession->getClientItem()) {
+//   //       continue;
+//   //     }
 
-  //     if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED)
-  //       continue;
+//   //     if (pSession->getConnState() < WEBSOCK_CONN_STATE_CONNECTED)
+//   //       continue;
 
-  //     if (NULL == pSession->getConn())
-  //       continue;
+//   //     if (NULL == pSession->getConn())
+//   //       continue;
 
-  //     if (pSession->getClientItem()->m_bOpen) {
+//   //     if (pSession->getClientItem()->m_bOpen) {
 
-  //       // Run event through filter
-  //       if (vscp_doLevel2Filter(pEvent, &pSession->getClientItem()->m_filter)) {
+//   //       // Run event through filter
+//   //       if (vscp_doLevel2Filter(pEvent, &pSession->getClientItem()->m_filter)) {
 
-  //         // User must be authorized to receive events
-  //         if (!(pSession->getClientItem()->m_pUserItem->getUserRights() & VSCP_USER_RIGHT_ALLOW_RCV_EVENT)) {
-  //           continue;
-  //         }
+//   //         // User must be authorised to receive events
+//   //         if (!(pSession->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_RCV_EVENT)) {
+//   //           continue;
+//   //         }
 
-  //         std::string str;
-  //         if (vscp_convertEventToString(str, pEvent)) {
+//   //         std::string str;
+//   //         if (vscp_convertEventToString(str, pEvent)) {
 
-  // #ifdef __VSCP_DEBUG_WEBSOCKET_RX
-  //           syslog(LOG_DEBUG, "Received ws event %s", str.c_str());
-  // #endif
+//           spdlog::debug("Received ws event %s", str.c_str());
 
-  //           // Write it out
-  //           if (WS_TYPE_1 == pSession->m_wstypes) {
-  //             str = ("E;") + str;
-  //             //mg_websocket_write(pSession->getConn(), (const char *) str.c_str(), str.length());
-  //           }
-  //           else if (WS_TYPE_2 == pSession->m_wstypes) {
-  //             std::string strEvent;
-  //             vscp_convertEventToJSON(strEvent, pEvent);
-  //             std::string str = vscp_str_format(WS2_EVENT, strEvent.c_str());
-  //             //mg_websocket_write(pSession->getConn(), (const char *) str.c_str(), str.length());
-  //           }
-  //         }
-  //       }
+//   //           // Write it out
+//   //           if (WS_TYPE_1 == pSession->m_wstypes) {
+//   //             str = ("E;") + str;
+//   //             //mg_websocket_write(pSession->getConn(), (const char *) str.c_str(), str.length());
+//   //           }
+//   //           else if (WS_TYPE_2 == pSession->m_wstypes) {
+//   //             std::string strEvent;
+//   //             vscp_convertEventToJSON(strEvent, pEvent);
+//   //             std::string str = vscp_str_format(WS2_EVENT, strEvent.c_str());
+//   //             //mg_websocket_write(pSession->getConn(), (const char *) str.c_str(), str.length());
+//   //           }
+//   //         }
+//   //       }
 
-  //     } // events available
+//   //     } // events available
 
-  //   } // for
+//   //   } // for
 
-  // pthread_mutex_unlock(&gpobj->m_mutex_websocketSession);
-}
+//   // pthread_mutex_unlock(&gpobj->m_mutex_websocketSession);
+
+//   return VSCP_ERROR_SUCCESS;
+// }
+
+//////////////////////////////////////////////////////////////////////////////
+// addClient
+//
+
+// bool
+// CWebSockSrv::addClient(CClientItem *pClientItem, uint32_t id)
+// {
+//   // Check pointer
+//   if (NULL == pClientItem) {
+//     return false;
+//   }
+
+//   // Add client to client list
+//   if (!m_clientList.addClient(pClientItem, id)) {
+//     return false;
+//   }
+
+//   // Set GUID for interface
+//   pClientItem->m_guid = m_guid;
+
+//   // Fill in client id
+//   pClientItem->m_guid.setNicknameID(0);
+//   pClientItem->m_guid.setClientID(pClientItem->m_clientID);
+
+//   return true;
+// }
+
+//////////////////////////////////////////////////////////////////////////////
+// addClient - GUID (for drivers with set GUID)
+//
+
+// bool
+// CWebSockSrv::addClient(CClientItem *pClientItem, cguid &guid)
+// {
+//   // Check pointer
+//   if (NULL == pClientItem) {
+//     return false;
+//   }
+
+//   // Add client to client list
+//   if (!m_clientList.addClient(pClientItem, guid)) {
+//     return false;
+//   }
+
+//   return true;
+// }
+
+//////////////////////////////////////////////////////////////////////////////
+// removeClient
+//
+
+// void
+// CWebSockSrv::removeClient(CClientItem *pClientItem)
+// {
+//   // Do not try to handle invalid clients
+//   if (NULL == pClientItem) {
+//     return;
+//   }
+
+//   // Remove the client
+//   m_clientList.removeClient(pClientItem);
+// }
 
 /////////////////////////////////////////////////////////////////////////////
 // generateSessionId
@@ -3170,171 +3333,302 @@ timer_fn(void *arg)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// srv_event_handler
+// websocksrv_event_handler
 //
 // SERVER event handler
 // This RESTful server implements the following endpoints:
 //   /ws1 - upgrade to Websocket, and implement ws1 server
 //   /ws2 - upgrade to Websocket, and implement ws2 server
 //   /rest - respond with JSON string {"result": 123}
-//   any other URI serves static files from s_web_root
+//   any other URI serves static files from web root directory
 
 static void
-server_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
+websocksrv_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
 {
-  // // Check pointers
-  // if (NULL == conn) {
-  //   syslog(LOG_ERR, "Communication context is NULL.");
-  //   return;
-  // }
+  // Check pointers
+  if (NULL == conn) {
+    spdlog::error("Communication context is NULL.");
+    return;
+  }
 
-  // if (NULL == ev_data) {
-  //   syslog(LOG_ERR, "server_event_handler: ev_data is NULL.");
-  //   return;
-  // }
+  CWebSockSrv *pWebSockSrv = (CWebSockSrv *) conn->fn_data;
+  if (NULL == pWebSockSrv) {
+    spdlog::error("websocksrv_event_handler: Invalid CWebSockSrv pointer.");
+    return;
+  }
 
-  // struct mg_tls_opts *tls_opts = NULL;
-  // struct mg_str s_ca_path      = mg_str(m_tls_ca_file);
-  // struct mg_str s_cert_path    = mg_str(m_tls_ca_file);
-  // struct mg_str s_key_path     = mg_str(m_tls_key_file);
+  struct mg_tls_opts *tls_opts = NULL;
 
-  // CWebSockSrv *pWebSockSrv = (CWebSockSrv *) mg_get_user_connection_data(conn);
-  // if (NULL == pWebSockSrv) {
-  //   syslog(LOG_ERR, "server_event_handler: Invalid CWebSockSrv pointer.");
-  //   return;
-  // }
+  if ((mgev == MG_EV_OPEN) && (conn->is_listening == 1)) {
+    conn->is_hexdumping = 1;
+    spdlog::debug("WebSockSrv is listening.");
+  }
+  else if (conn->is_tls && (mgev == MG_EV_ACCEPT)) {
+    spdlog::debug("WebSockSrv accepted connection.");
+    if (mg_url_is_ssl(pWebSockSrv->m_j_config["interface"].get<std::string>().c_str())) {
+      struct mg_tls_opts opts = { .cert = mg_unpacked(pWebSockSrv->getCertPath().c_str()),
+                                  .key  = mg_unpacked(pWebSockSrv->getKeyPath().c_str()) };
+      mg_tls_init(conn, &opts);
+    }
+    else {
+      spdlog::error("websocksrv_event_handler: TLS connection on non-TLS port.");
+      conn->is_closing = 1;
+      return;
+    }
+  }
+  else if (MG_EV_HTTP_MSG == mgev) {
+    struct mg_http_message *hm = (struct mg_http_message *) ev_data;
 
-  // if (mgev == MG_EV_OPEN) {
-  //   conn->is_hexdumping = 1;
-  // }
-  // else if (conn->is_tls && mgev == MG_EV_ACCEPT) {
-  //   struct mg_str ca        = mg_file_read(&mg_fs_posix, s_ca_path.buf);
-  //   struct mg_str cert      = mg_file_read(&mg_fs_posix, s_cert_path.buf);
-  //   struct mg_str key       = mg_file_read(&mg_fs_posix, s_key_path.buf);
-  //   struct mg_tls_opts opts = { .ca = ca, .cert = cert, .key = key };
-  //   mg_tls_init(conn, &opts);
-  // }
-  // else if (mgev == MG_EV_HTTP_MSG) {
-  //   struct mg_http_message *hm = (struct mg_http_message *) ev_data;
-  //   if (mg_match(hm->uri, mg_str("/ws1"), NULL)) {
-  //     // Upgrade to websocket (ws1 protocol). From now on, a connection is a full-duplex
-  //     // Websocket connection, which will receive MG_EV_WS_MSG events.
-  //     mg_ws_upgrade(conn, hm, NULL);
+    // Get protocol version and sec-key
+    struct mg_str *header;
+    char pws_version[10];
+    char pws_key[33];
+    memset(pws_version, 0, sizeof(pws_version));
+    if (NULL != (header = mg_http_get_header(hm, "Sec-WebSocket-Version"))) {
+      strncpy(pws_version, header->buf, std::min(header->len + 1, sizeof(pws_version)));
+    }
+    memset(pws_key, 0, sizeof(pws_key));
+    if (NULL != (header = mg_http_get_header(hm, "Sec-WebSocket-Key"))) {
+      strncpy(pws_key, header->buf, std::min(header->len + 1, sizeof(pws_key)));
+    }
 
-  //     CWebSockSession *pSession = new CWebSockSession();
-  //     if (NULL == pSession) {
-  //       syslog(LOG_ERR, "server_event_handler: Failed to create CWebSockSession instance.");
-  //       mg_http_reply(con, 500, "", "Internal Server Error\n");
-  //       return;
-  //     }
-  //     pSession->m_wstypes = WS_TYPE_1;
-  //     conn->pfn_data      = pSession; // Set session pointer in connection
+    if (mg_match(hm->uri, mg_str("/ws1"), NULL)) {
+      // Upgrade to websocket (ws1 protocol). From now on, a connection is a full-duplex
+      // Websocket connection, which will receive MG_EV_WS_MSG events.
+      mg_ws_upgrade(conn, hm, NULL);
 
-  //     // Send AUTH start message
-  //     ws1_readyHandler(conn, pSession);
-  //   }
-  //   else if (mg_match(hm->uri, mg_str("/ws2"), NULL)) {
-  //     // Upgrade to websocket (ws2 protocol). From now on, a connection is a full-duplex
-  //     // Websocket connection, which will receive MG_EV_WS_MSG events.
-  //     mg_ws_upgrade(conn, hm, NULL);
+      CWebSockSession *pSession = pWebSockSrv->newSession(conn->id, pws_version, pws_key);
+      if (NULL == pSession) {
+        spdlog::error("websocksrv_event_handler: Failed to create CWebSockSession instance.");
+        mg_http_reply(conn, 500, "", "Internal Server Error - closing connection\n");
+        conn->is_closing = 1;
+        return;
+      }
 
-  //     CWebSockSession *pSession = new CWebSockSession();
-  //     if (NULL == pSession) {
-  //       syslog(LOG_ERR, "server_event_handler: Failed to create CWebSockSession instance.");
-  //       mg_http_reply(conn, 500, "", "Internal Server Error\n");
-  //       return;
-  //     }
-  //     pSession->m_wstypes = WS_TYPE_2;
-  //     conn->pfn_data      = pSession; // Set session pointer in connection
+      pSession->setWsType(WS_TYPE_1);
 
-  //     // Send AUTH start message
-  //     ws2_readyHandler(conn, pSession);
-  //   }
-  //   else if (mg_match(hm->uri, mg_str("/rest"), NULL)) {
-  //     // Serve REST response
-  //     mg_http_reply(conn, 200, "", "{\"result\": %d}\n", 123);
-  //   }
-  //   else {
-  //     // Serve static files
-  //     struct mg_http_serve_opts opts = { .root_dir = s_web_root };
-  //     mg_http_serve_dir(conn, ev_data, &opts);
-  //   }
-  // }
-  // else if (mgev == MG_EV_WS_MSG) {
-  //   // Got websocket frame. Received data is wm->data. Echo it back!
-  //   struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
-  //   mg_ws_send(conn, wm->data.buf, wm->data.len, WEBSOCKET_OP_TEXT);
-  // }
-  // else if (mgev == MG_EV_WAKEUP) {
-  //   struct mg_str *data = (struct mg_str *) ev_data;
-  //   // Broadcast message to all connected websocket clients,
-  //   // except the one that sent it.
-  //   if (data == NULL || data->len == 0) {
-  //     syslog(LOG_ERR, "server_event_handler: No data to send.");
-  //     return;
-  //   }
-  //   syslog(LOG_INFO, "Broadcasting message: %.*s", (int) data->len, data->buf);
+      // Send AUTH start message
+      pWebSockSrv->ws1_readyHandler(conn, pSession);
 
-  //   // Iterate over all connections in the manager
-  //   // and send the message to all websocket connections.
-  //   // Note: This is a simple broadcast, you may want to implement
-  //   // more sophisticated logic to filter which connections should receive the message.
-  //   // For example, you might want to send only to connections that have a specific label or
-  //   // that are subscribed to a specific topic.
+      // conn->pfn_data = pSession; // Set session pointer in connection
+    }
+    else if (mg_match(hm->uri, mg_str("/ws2"), NULL)) {
+      // Upgrade to websocket (ws2 protocol). From now on, a connection is a full-duplex
+      // Websocket connection, which will receive MG_EV_WS_MSG events.
+      mg_ws_upgrade(conn, hm, NULL);
 
-  //   // Traverse over all connections
-  //   for (struct mg_connection *wc = conn->mgr->conns; wc != NULL; wc = wc->next) {
-  //     // Send to all other connections not to self
-  //     if ((wc->id != conn->id) && wc->is_websocket) {
-  //       mg_ws_send(wc, data->buf, data->len, WEBSOCKET_OP_TEXT);
-  //     }
-  //   }
-  //   else if (mgev == MG_EV_CLOSE)
-  //   {
-  //     // Connection is closed, free resources
-  //     if (conn->is_tls) {
-  //       mg_tls_free(conn);
-  //     }
+      CWebSockSession *pSession = pWebSockSrv->newSession(conn->id, pws_version, pws_key);
+      if (NULL == pSession) {
+        spdlog::error("websocksrv_event_handler: Failed to create CWebSockSession instance.");
+        mg_http_reply(conn, 500, "", "Internal Server Error - closing connection\n");
+        conn->is_closing = 1;
+        return;
+      }
 
-  //     if (nullptr != conn->pfn_data) {
-  //       // Free the session data
-  //       CWebSockSession *pSession = (CWebSockSession *) conn->pfn_data;
-  //       delete pSession;
-  //       conn->pfn_data = NULL; // Clear pointer to avoid dangling pointer
-  //     }
+      pSession->setWsType(WS_TYPE_2);
+      conn->pfn_data = pSession; // Set session pointer in connection
 
-  //     // syslog(LOG_INFO, "Connection closed: %s", conn->label);
-  //   }
-  //   // else if (mgev == MG_EV_TIMER)
-  //   // {
-  //   //   // Timer event, do nothing
-  //   // }
-  //   else
-  //   {
-  //     syslog(LOG_ERR, "Unhandled event %d", mgev);
-  //   }
+      // Send AUTH start message
+      pWebSockSrv->ws2_readyHandler(conn, pSession);
+    }
+    else if (mg_match(hm->uri, mg_str("/rest"), NULL)) {
+      // Serve REST response
+      mg_http_reply(conn, 200, "", "{\"result\": %d}\n", 123);
+    }
+    else {
+      // Serve static files
+      // struct mg_http_serve_opts opts = { .root_dir = getWebRoot().c_str() };
+      // mg_http_serve_dir(conn, hm, &opts);
+    }
+  }
+  else if (MG_EV_WS_MSG == mgev) {
+
+    // Got websocket frame. Received data is wm->data.
+    struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
+    //mg_ws_send(conn, wm->data.buf, wm->data.len, WEBSOCKET_OP_TEXT);
+
+    CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
+    if (NULL == pSession) {
+      spdlog::error("websocksrv_event_handler: Failed to get session.");
+      mg_http_reply(conn, 500, "", "Internal Server Error (Failed to get session.)\n");
+      return;
+    }
+
+    if (WS_TYPE_1 == pSession->getWsType()) {
+      std::string strMsg((const char *) wm->data.buf, wm->data.len);
+      pWebSockSrv->ws1_dataHandler(conn, wm);
+    }
+    else if (WS_TYPE_2 == pSession->getWsType()) {
+      std::string strMsg((const char *) wm->data.buf, wm->data.len);
+      pWebSockSrv->ws2_dataHandler(conn, wm);
+    }
+  }
+  // Message form another thread has been received
+  else if (MG_EV_WAKEUP == mgev) {
+
+    // VSCP Event from API write should be sent to all clients
+
+    // Create new session
+    // CWebSockSession *pSession = newSession(conn.id, pws_version, pws_key);
+    // if (NULL == pSession) {
+    //   spdlog::error("Internal error: sendEvent - pSession == NULL");
+    //   return;
+    // }
+
+    // Get data pointer
+    const struct mg_str *data = (const struct mg_str *) ev_data;
+    if (NULL == data) {
+      spdlog::error("websocksrv_event_handler: Invalid data pointer.");
+      return;
+    }
+
+    // Get event pointer
+    vscpEvent *pev = (vscpEvent *) data->buf;
+    if (NULL == pev) {
+      spdlog::error("websocksrv_event_handler: Invalid event pointer.");
+      return;
+    }
+
+    spdlog::debug("Send message (all clients): %.*s", (int) data->len, data->buf);
+
+    // Traverse over all connections
+    for (struct mg_connection *wc = conn->mgr->conns; wc != NULL; wc = wc->next) {
+
+      if (conn->id == pev->obid) {
+        continue; // Don't send to ourself
+      }
+      if (wc->is_websocket == 0) {
+        continue; // Not a websocket connection
+      }
+      CWebSockSession *pSession = pWebSockSrv->getSession(wc->id);
+      if (NULL == pSession) {
+        continue; // Not our connection
+      }
+
+      // Write it out
+      if (WS_TYPE_1 == pSession->getWsType()) {
+        std::string str;
+        if (vscp_convertEventToString(str, pev)) {
+          str = ("E;") + str;
+          mg_ws_send(pSession->getConnection(), (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+        }
+      }
+      else if (WS_TYPE_2 == pSession->getWsType()) {
+        std::string strEvent;
+        vscp_convertEventToJSON(strEvent, pev);
+        std::string str = vscp_str_format(WS2_EVENT, strEvent.c_str());
+        mg_ws_send(pSession->getConnection(), (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+      }
+    }
+
+    delete pev; // Free the data buffer allocated in another thread
+  }
+  else if (MG_EV_CLOSE == mgev) {
+    // Connection is closed, free resources
+    if (conn->is_tls) {
+      mg_tls_free(conn);
+    }
+
+    CWebSockSession *pSession = pWebSockSrv->getSession(conn->id);
+    if (NULL == pSession) {
+      // Free the session data
+      delete pSession;
+    }
+
+    spdlog::info("Connection closed");
+  }
+  // else {
+  //   spdlog::error("Unhandled event {}", mgev);
   // }
 }
 
+static const char *s_listen_on = "ws://localhost:8000";
+static const char *s_web_root  = ".";
+static const char *s_ca_path   = "ca.pem";
+static const char *s_cert_path = "cert.pem";
+static const char *s_key_path  = "key.pem";
+
+// This RESTful server implements the following endpoints:
+//   /websocket - upgrade to Websocket, and implement websocket echo server
+//   /rest - respond with JSON string {"result": 123}
+//   any other URI serves static files from s_web_root
+// static void
+// fn(struct mg_connection *c, int ev, void *ev_data)
+// {
+
+//   CWebSockSrv *pWebSockSrv = (CWebSockSrv *) c->fn_data;
+//   if (NULL == pWebSockSrv) {
+//     spdlog::error("websocksrv_event_handler: Invalid CWebSockSrv pointer.");
+//     return;
+//   }
+
+//   if (ev == MG_EV_OPEN) {
+//     c->is_hexdumping = 1;
+//   }
+//   else if (c->is_tls && ev == MG_EV_ACCEPT) {
+//     struct mg_str ca        = mg_file_read(&mg_fs_posix, s_ca_path);
+//     struct mg_str cert      = mg_file_read(&mg_fs_posix, s_cert_path);
+//     struct mg_str key       = mg_file_read(&mg_fs_posix, s_key_path);
+//     struct mg_tls_opts opts = { .ca = ca, .cert = cert, .key = key };
+//     mg_tls_init(c, &opts);
+//   }
+//   else if (ev == MG_EV_HTTP_MSG) {
+//     struct mg_http_message *hm = (struct mg_http_message *) ev_data;
+//     if (mg_match(hm->uri, mg_str("/ws1"), NULL)) {
+//       // Upgrade to websocket. From now on, a connection is a full-duplex
+//       // Websocket connection, which will receive MG_EV_WS_MSG events.
+//       mg_ws_upgrade(c, hm, NULL);
+
+//       CWebSockSession *pSession = new CWebSockSession();
+//       if (NULL == pSession) {
+//         spdlog::error("websocksrv_event_handler: Failed to create CWebSockSession instance.");
+//         mg_http_reply(c, 500, "", "Internal Server Error\n");
+//         return;
+//       }
+//       // pSession->setWsType(WS_TYPE_2);
+//       // c->pfn_data = pSession; // Set session pointer in connection
+
+//       // Send AUTH start message
+//       pWebSockSrv->ws2_readyHandler(c, pSession);
+//     }
+//     else if (mg_match(hm->uri, mg_str("/rest"), NULL)) {
+//       // Serve REST response
+//       mg_http_reply(c, 200, "", "{\"result\": %d}\n", 123);
+//     }
+//     else {
+//       // Serve static files
+//       struct mg_http_serve_opts opts = { .root_dir = s_web_root };
+//       // mg_http_serve_dir(c, ev_data, &opts);
+//     }
+//   }
+//   else if (ev == MG_EV_WS_MSG) {
+//     // Got websocket frame. Received data is wm->data. Echo it back!
+//     struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
+//     mg_ws_send(c, wm->data.buf, wm->data.len, WEBSOCKET_OP_TEXT);
+//   }
+// }
+
 ///////////////////////////////////////////////////////////////////////////////
-// websockListenThread
+// websockWorkerThread
 //
 
 static void *
-websockListenThread(void *pData)
+websockWorkerThread(void *pData)
 {
   CWebSockSrv *pWebSockSrv = (CWebSockSrv *) pData;
   if (NULL == pWebSockSrv) {
-    syslog(LOG_ERR, "websockListenThread: Invalid CWebSockSrv pointer.");
+    spdlog::error("websockWorkerThread: Invalid CWebSockSrv pointer.");
     return NULL;
   }
 
   struct mg_mgr mgr; // Event manager
   mg_mgr_init(&mgr); // Initialise event manager
-  printf("Starting WS listener on %s/websocket\n", pWebSockSrv->getUrl().c_str());
+  spdlog::info("Starting WS listener on %s/websocket\n", pWebSockSrv->getUrl().c_str());
 
-  // Create HTTP listener
-  mg_http_listen(&mgr, pWebSockSrv->getUrl().c_str(), server_event_handler, NULL);
+  // Create HTTP listener (websocket object is in conn->fn_data)
+  mg_http_listen(&mgr, pWebSockSrv->getUrl().c_str(), websocksrv_event_handler, pWebSockSrv);
+
+  mg_wakeup_init(&mgr);
 
   while (!pWebSockSrv->m_bQuit) {
     mg_mgr_poll(&mgr, 100); // Poll for events

@@ -1,8 +1,9 @@
 // version.h
 //
-// Build instructions for VSCP Works.
+// The MIT License (MIT)
 //
-// Copyright (c) 2000-2025 Åke Hedman, the VSCP Project
+// Copyright (C) 2000-2025 Ake Hedman, the VSCP project
+// <info@vscp.org>
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -10,10 +11,10 @@
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-// 
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,9 +22,33 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-//
+#ifndef _____VSCPL2DRV_WEBSOCKSRV_VERSION_h_____
+#define _____VSCPL2DRV_WEBSOCKSRV_VERSION_h_____
+/*
+    MAJOR version with incompatible API changes,
+    MINOR version with add functionality in a backwards-compatible manner, and
+    RELEASE version with backwards-compatible bug fixes.
+    BUILD Just a new build.
+*/
+// I M P O T A N T ! ! ! Lines below must be located at line
+// 35/36/37/38/40/42/43 I M P O T A N T ! ! !
+#define VSCPL2DRV_WEBSOCKSRV_VERSION     1
+#define VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION     0
+#define VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION   0
+#define VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION     0
 
-#define MAJOR_VERSION       1
-#define MINOR_VERSION       0
-#define RELEASE_VERSION     0
-#define BUILD_VERSION       0
+#define VSCPL2DRV_WEBSOCKSRV_DISPLAY_VERSION   "1.0.0-0"
+
+#define VSCPL2DRV_WEBSOCKSRV_COPYRIGHT                                                     \
+    "Copyright (C) 2000-2025 Ake Hedman, the VSCP project, "                \
+    "https://www.vscp.org"
+#define VSCPL2DRV_WEBSOCKSRV_COPYRIGHT_HTML                                                \
+    "Copyright (C) 2000-2025 Ake Hedman, <a "                               \
+    "href=\"mailto:info@vscp.org\">the VSCP project</a>, <a "               \
+    "href=\"https://www.vscp.org\">https://"                                \
+    "www.grodansparadis.com</a>"
+
+#define MAKE_VSCPL2DRV_WEBSOCKSRV_VERSION(major, minor, release)                                 \
+    (((major) << 16) | ((minor) << 8) | (release))
+#endif
+
