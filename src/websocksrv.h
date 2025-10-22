@@ -155,6 +155,11 @@ public:
   */
   int stop(void);
 
+  /*!
+    @brief Generate a random session ID (SID)
+  */
+  void generateSid(void);
+
   // * * * Getters/Setters
 
   void setWebsocketKey(const uint8_t *pKey)
@@ -613,7 +618,12 @@ public:
         @param pKey Null terminated string key (max 255 characters)
         @param pSid Pointer to 33 byte sid that will receive sid
      */
-  bool generateSessionId(const char *pKey, char *pSid);
+  // bool generateSessionId(const char *pKey, char *pSid);
+
+  /*!
+    @brief Generate a random session ID (SID)
+  */
+  void generateSid(void);
 
   /*!
     Read encryption key

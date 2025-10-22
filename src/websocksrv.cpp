@@ -111,15 +111,7 @@ CWebSockSession::CWebSockSession(void)
   m_strConcatenated.clear();
   memset(m_key, 0, sizeof(m_key)); // No encryption key yet
 
-  // Generate the sid
-  unsigned char iv[16];
-  char hexiv[33];
-  getRandomIV(iv, 16); // Generate 16 random bytes
-  memset(hexiv, 0, sizeof(hexiv));
-  vscp_byteArray2HexStr(hexiv, iv, 16);
-
-  memset(m_sid, 0, sizeof(m_sid));
-  memcpy(m_sid, hexiv, 32);
+  generateSid(); // Generate session ID
 
   vscp_clearVSCPFilter(m_pfilter); // Clear filter
 
@@ -132,6 +124,28 @@ CWebSockSession::CWebSockSession(void)
 CWebSockSession::~CWebSockSession(void) {
 
 };
+
+////////////////////////////////////////////////////////////////////////////////
+// generateSid
+//
+
+void
+CWebSockSession::generateSid(void)
+{
+  // Generate the sid
+  unsigned char iv[16];
+  char hexiv[33];
+  getRandomIV(iv, 16); // Generate 16 random bytes
+  memset(hexiv, 0, sizeof(hexiv));
+  vscp_byteArray2HexStr(hexiv, iv, 16);
+
+  // Make upper case
+  for (int i = 0; i < 32; i++) {
+    hexiv[i] = toupper(hexiv[i]);
+  }
+  memset(m_sid, 0, sizeof(m_sid));
+  memcpy(m_sid, hexiv, 32);
+}
 
 // ----------------------------------------------------------------------------
 
@@ -210,9 +224,9 @@ CWebSockSrv::CWebSockSrv(void)
   m_consoleLogLevel   = spdlog::level::info;
   m_consoleLogPattern = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
 
-  m_bEnableFileLog = true;
-  m_fileLogLevel   = spdlog::level::info;
-  m_fileLogPattern = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
+  m_bEnableFileLog   = true;
+  m_fileLogLevel     = spdlog::level::info;
+  m_fileLogPattern   = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
   m_path_to_log_file = "/tmp/vscpl2drv-websocksrv.log";
   m_max_log_size     = 5242880;
   m_max_log_files    = 7;
@@ -257,6 +271,8 @@ CWebSockSrv::~CWebSockSrv(void)
 
   pthread_mutex_destroy(&m_mutex_UserList);
 }
+
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // open
@@ -2046,6 +2062,17 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
         return VSCP_ERROR_SUCCESS; // We still leave channel open
       }
 
+      // Make uppercase
+      std::transform(strIV.begin(), strIV.end(), strIV.begin(), ::toupper);
+
+      // iv should be the same as sid
+      if (strIV != pSession->getSid()) {
+        spdlog::error("WS1: AUTH failed (invalid iv)");
+        str = vscp_str_format(("-;AUTH;%d;%s"), (int) WEBSOCK_ERROR_SYNTAX_ERROR, WEBSOCK_STR_ERROR_SYNTAX_ERROR);
+        mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+        return VSCP_ERROR_SUCCESS; // We still leave channel open
+      }
+
       std::string strCrypto = tokens.front();
       tokens.pop_front();
 
@@ -2057,6 +2084,9 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
         return VSCP_ERROR_SUCCESS; // We still leave channel open
       }
 
+      // Make uppercase
+      std::transform(strCrypto.begin(), strCrypto.end(), strCrypto.begin(), ::toupper);
+
       if (authentication(conn, strCrypto, strIV)) {
         std::string userSettings;
         pSession->getUserItem()->getAsString(userSettings);
@@ -2066,6 +2096,7 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
       else {
         str = vscp_str_format(("-;AUTH;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORISED, WEBSOCK_STR_ERROR_NOT_AUTHORISED);
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+        generateSid(); // Generate new sid
         pSession->setAuthenticated(false); // not authenticated
       }
     }
@@ -3390,41 +3421,41 @@ CWebSockSrv::ws2_xcommand(struct mg_connection *conn, std::string &strCmd)
 // generateSessionId
 //
 
-bool
-CWebSockSrv::generateSessionId(const char *pKey, char *psid)
-{
-  char buf[8193];
+// bool
+// CWebSockSrv::generateSessionId(const char *pKey, char *psid)
+// {
+//   char buf[8193];
 
-  // Check pointers
-  if (NULL == pKey) {
-    return false;
-  }
-  if (NULL == psid) {
-    return false;
-  }
-  // Check key length
-  if (strlen(pKey) > 256) {
-    return false;
-  }
+//   // Check pointers
+//   if (NULL == pKey) {
+//     return false;
+//   }
+//   if (NULL == psid) {
+//     return false;
+//   }
+//   // Check key length
+//   if (strlen(pKey) > 256) {
+//     return false;
+//   }
 
-  // Generate a random session ID
-  time_t t;
-  t = time(NULL);
-  snprintf(buf,
-           sizeof(buf),
-           "__%s_%X%X%X%X_be_hungry_stay_foolish_%X%X",
-           pKey,
-           (unsigned int) rand(),
-           (unsigned int) rand(),
-           (unsigned int) rand(),
-           (unsigned int) t,
-           (unsigned int) rand(),
-           1337);
+//   // Generate a random session ID
+//   time_t t;
+//   t = time(NULL);
+//   snprintf(buf,
+//            sizeof(buf),
+//            "__%s_%X%X%X%X_be_hungry_stay_foolish_%X%X",
+//            pKey,
+//            (unsigned int) rand(),
+//            (unsigned int) rand(),
+//            (unsigned int) rand(),
+//            (unsigned int) t,
+//            (unsigned int) rand(),
+//            1337);
 
-  vscp_md5(psid, (const unsigned char *) buf, strlen(buf));
+//   vscp_md5(psid, (const unsigned char *) buf, strlen(buf));
 
-  return true;
-}
+//   return true;
+// }
 
 /////////////////////////////////////////////////////////////////////////////
 // readEncryptionKey
