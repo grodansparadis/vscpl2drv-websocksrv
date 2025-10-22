@@ -59,9 +59,14 @@
 
 using namespace std::chrono;
 
-static std::string g_strPath      = "/home/akhe/development/VSCP/vscpl2drv-websocksrv/build/libvscpl2drv-websocksrv.so";
-static std::string g_strParameter = "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/linux/websocksrv.json";
-static cguid g_guid("FF:FF:FF:FF:FF:FF:FF:FE:00:00:00:00:00:00:00:01");
+static std::string s_strDriverPath      = "/home/akhe/development/VSCP/vscpl2drv-websocksrv/build/libvscpl2drv-websocksrv.so";
+static std::string s_strParameter = "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/linux/websocksrv.json";
+static cguid s_guid("FF:FF:FF:FF:FF:FF:FF:FE:00:00:00:00:00:00:00:01");
+
+// Demo credentials
+static std::string s_username = "admin";
+static std::string s_password = "secret";
+static std::string s_key    = "2DBB079A38985AF00EBEEFE22F9FFA0E7F72DF06EBE44563EDF4A1073CABC7D44FB0EEC1271C7D75316154F2C6FF80B8627B27D9A5C1C6E88E1CB4E8D7EE4B711F512B5B9E23B7EEB660D133AC3201D6581CB0639A9382171175CB14DC828C98282BED750A8059E5CF864BB55381AA9DA950B9E3CE8285E1EA38D21AFC9A4AE5CA5F375208F72E5B9113EA3F7570415E6EA0A637DB1848B38485B7103EAE8053DA6ABAD02D8820929021EB64503AC6FE6A38F14045A2164412FAC13E9707EB6407B1FB01FA771D07B58D5C3C1D4A584E3EC1AEBC449EC1CBAFC06CEAEDA975F7C936419A90C3F3BCC9F4419E35E08C50DA9280C097D07E7E77D5720EFA46D32F";
 
 // Level II driver methods
 LPFNDLL_VSCPOPEN proc_VSCPOpen;
@@ -75,26 +80,32 @@ void *hdll; // Handle to DLL  libvscpl2drv-websocksrv.so
 int
 main(int argc, char *argv[])
 {
-  void *hdll;       // Handle to  libvscpl2drv-websocksrv.so
+  void *hdll;       // Handle to libvscpl2drv-websocksrv.so
   long openHandle;  // Driver handle
   vscpEvent evSend; // VSCP send event
   vscpEvent *pev;   // VSCP event
 
+  uint32_t counter = 0; // used for event data
+
+  // Define counter event
   memset(&evSend, 0, sizeof(vscpEvent));
-  evSend.vscp_class = VSCP_CLASS1_PROTOCOL;
-  evSend.vscp_type  = VSCP_TYPE_PROTOCOL_GENERAL;
+  evSend.vscp_class = VSCP_CLASS1_MEASUREMENT;
+  evSend.vscp_type  = VSCP_TYPE_MEASUREMENT_COUNT;
   evSend.timestamp  = vscp_makeTimeStamp();
-  evSend.sizeData   = 3;
+  evSend.sizeData   = 4;
   evSend.pdata      = new uint8_t[3];
-  evSend.pdata[0]   = 11;
-  evSend.pdata[1]   = 22;
-  evSend.pdata[2]   = 33;
+  evSend.pdata[0]   = 0x00;
+  evSend.pdata[1]   = 0x00;
+  evSend.pdata[2]   = 0x00;
+  evSend.pdata[3]   = 0x00;
+
+  // -------------------------------------------------------------
 
   // Now find methods in library
   spdlog::info("Loading level II driver");
 
   // Load dynamic library
-  hdll = dlopen(g_strPath.c_str(), RTLD_LAZY);
+  hdll = dlopen(s_strDriverPath.c_str(), RTLD_LAZY);
   if (!hdll) {
     spdlog::error("Unable to load dynamic library. path = {}", dlerror());
     exit(-1);
@@ -140,7 +151,7 @@ main(int argc, char *argv[])
   // -------------------------------------------------------------
 
   // Open up the L2 driver
-  openHandle = proc_VSCPOpen(g_strParameter.c_str(), g_guid.getGUID());
+  openHandle = proc_VSCPOpen(s_strParameter.c_str(), s_guid.getGUID());
 
   if (0 == openHandle) {
     // Free the library
@@ -151,18 +162,31 @@ main(int argc, char *argv[])
     exit(-1);
   }
 
+  // Wait for connection to be established and +;AUTH0;iv
+  // int cntTries = 0;
+  // while (CANAL_ERROR_SUCCESS != proc_VSCPRead(openHandle, pev, 1000)) {
+  //   if (++cntTries > 10) {
+  //     spdlog::error("Timeout waiting for AUTH0 from server");
+  //     exit(-1);
+  //   }
+  // }
+
   while (true) {
 
     vscpEvent ev;
     memset(&ev, 0, sizeof(vscpEvent));
 
     sleep(1);
-    continue;
 
     // Block until event is received
     if (CANAL_ERROR_SUCCESS != proc_VSCPRead(openHandle, pev, 1000)) {
       // Send event
-      //proc_VSCPWrite(openHandle, &evSend, 500);
+      proc_VSCPWrite(openHandle, &evSend, 500);
+      counter++;
+      evSend.pdata[0] = (counter >> 24) & 0xff;
+      evSend.pdata[1] = (counter >> 16) & 0xff;
+      evSend.pdata[2] = (counter >> 8) & 0xff;
+      evSend.pdata[3] = counter & 0xff;
       continue;
     }
 

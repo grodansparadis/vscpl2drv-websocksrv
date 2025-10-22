@@ -248,8 +248,7 @@ VSCPWrite(long handle, const vscpEvent *pEvent, unsigned long timeout)
     return CANAL_ERROR_MEMORY;
   }
 
-  // pdrvObj->addEvent2SendQueue(pEvent);
-  pdrvObj->sendEventAllClients(pEvent);
+  pdrvObj->addEvent2SendQueue(pEvent);
 
   return CANAL_ERROR_SUCCESS;
 }

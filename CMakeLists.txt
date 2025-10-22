@@ -218,6 +218,8 @@ add_library(${PROJECT_NAME}
   ./third_party/vscp/src/vscp/common/vscphelper.h
   ./third_party/vscp/src/vscp/common/vscphelper.cpp
   ./third_party/vscp/src/vscp/common/canal.h
+  ./third_party/vscp/src/common/vscpbase64.h
+  ./third_party/vscp/src/common/vscpbase64.c
   ./third_party/vscp/src/common/vscp-aes.h
   ./third_party/vscp/src/common/vscp-aes.c
   ./third_party/vscp/src/common/crc.h

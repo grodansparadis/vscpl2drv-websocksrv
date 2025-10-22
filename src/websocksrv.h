@@ -87,8 +87,9 @@ using json = nlohmann::json;
 
 // Authentication states
 enum {
-  WEBSOCK_CONN_STATE_NULL = 0,  // Not connected
-  WEBSOCK_CONN_STATE_CONNECTED, // Connected
+  WEBSOCK_CONN_STATE_NULL = 0,      // Not connected
+  WEBSOCK_CONN_STATE_CONNECTED,     // Connected
+  WEBSOCK_CONN_STATE_AUTHENTICATED, // Authenticated
   WEBSOCK_CONN_STATE_DATA
 }; // Data transfer
 
@@ -156,11 +157,21 @@ public:
 
   // * * * Getters/Setters
 
+  void setWebsocketKey(const uint8_t *pKey)
+  {
+    if (pKey) {
+      memcpy(m_websocket_key, pKey, sizeof(m_websocket_key));
+    }
+    else {
+      memset(m_websocket_key, 0, sizeof(m_websocket_key));
+    }
+  }
+
   /*!
     @brief Get the unique ID for this session
     @return Pointer to the unique ID for this session
   */
-  const char *getWebsocketKey(void) { return m_key; }
+  const uint8_t *getWebsocketKey(void) { return m_websocket_key; }
 
   // Getters/setters
 
@@ -186,20 +197,19 @@ public:
   }
 
   /*!
-   @brief Get the websocket key (WS_KEY) for this session
-   @return Pointer to the websocket key for this session
+   @brief Get the encryption key for this session
+   @return Pointer to the encryption key for this session
   */
-  const char *getKey(void) { return m_key; }
+  const uint8_t *getKey(void) { return m_key; }
 
   /*!
-   @brief Set the websocket key (WS_KEY) for this session
-   @param pKey Null terminated string key (max 32 characters)
+   @brief Set the encryption key for this session
+   @param pKey 16 byte encryption key
   */
-  void setKey(const char *pKey)
+  void setKey(const uint8_t *pKey)
   {
     if (pKey) {
-      strncpy(m_key, pKey, sizeof(m_key));
-      m_key[sizeof(m_key) - 1] = 0;
+      memcpy(m_key, pKey, sizeof(m_key));
     }
     else {
       memset(m_key, 0, sizeof(m_key));
@@ -235,14 +245,14 @@ public:
   bool isOpen(void) { return m_bOpen; };
   void setOpen(bool bOpen) { m_bOpen = bOpen; };
 
-  vscpEventFilter &getFilter(void) { return m_filter; };
-  void setFilter(const vscpEventFilter &filter) { m_filter = filter; };
+  vscpEventFilter *getFilter(void) { return m_pfilter; };
+  void setFilter(const vscpEventFilter *pfilter) { vscp_copyVSCPFilter(m_pfilter, pfilter); };
 
   cguid *getGuid() { return &m_guid; };
   void setGuid(const cguid &guid) { m_guid = guid; };
 
-  CUserItem *getUserItem(void) { return &m_pUserItem; };
-  void setUserItem(const CUserItem &user) { m_pUserItem = user; };
+  CUserItem *getUserItem(void) { return m_pUserItem; };
+  void setUserItem(CUserItem *puser) { m_pUserItem = puser; };
 
   bool isAuthenticated(void) { return m_bAuthenticated; };
   void setAuthenticated(bool bAuthenticated) { m_bAuthenticated = bAuthenticated; };
@@ -264,14 +274,18 @@ private:
   // Connection state (see enums above)
   int m_conn_state;
 
-  // Unique ID for this session.
-  char m_key[33]; // Sec-WebSocket-Key
+  // Encryption key
+  uint8_t m_key[16];
 
+  // Unique ID for this session.
   // 16 byte iv (SID) for this session
   char m_sid[33];
 
-  // Protocol version
+  // Websocket protocol version saved from header
   int m_version; // Sec-WebSocket-Version
+
+  // Websocket key (WS_KEY) for this session
+  uint8_t m_websocket_key[24];
 
   // Time when this session was last active.
   time_t lastActiveTime;
@@ -285,7 +299,7 @@ private:
   bool m_bOpen;
 
   // Filter/mask for VSCP
-  vscpEventFilter m_filter;
+  vscpEventFilter *m_pfilter;
 
   /*!
       Interface GUID
@@ -307,7 +321,7 @@ private:
   bool m_bAuthenticated; // True if authenticated
 
   // User item
-  CUserItem m_pUserItem;
+  CUserItem *m_pUserItem;
 
   struct mg_connection *m_conn; // Mongoose connection
 };
@@ -381,8 +395,8 @@ public:
 };
 
 // Public functions
-void
-websock_post_incomingEvents(void);
+// void
+// websock_post_incomingEvents(void);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Class for websocket server
@@ -472,18 +486,19 @@ public:
   /*!
    @brief Authentication of a websocket connection
    @param conn Pointer to the mongoose connection
+    @param strContent Reference to string that holds the content to be
+                       authenticated
    @param strIV Reference to string that will receive the IV
-   @param strCrypto Reference to string that will receive the crypto key
    @return VSCP_ERROR_SUCCESS if all is OK, otherwise VSCP error code.
   */
-  int authentication(struct mg_connection *conn, std::string &strIV, std::string &strCrypto);
+  int authentication(struct mg_connection *conn, std::string &strContent, std::string &strIV);
 
   /*!
     @brief Add an event to the send queue
     @param pEvent Pointer to the VSCP event
     @return VSCP_ERROR_SUCCESS on success, otherwise VSCP error code.
   */
-  // int addEvent2SendQueue(const vscpEvent *pEvent);
+  int addEvent2SendQueue(const vscpEvent *pEvent);
 
   /*!
     @brief Add an event to the receive queue
@@ -577,7 +592,7 @@ public:
     @param ws_key Pointer to websocket key string
     @return Pointer to the new websocket session
   */
-  CWebSockSession *newSession(unsigned long id, const char *pws_version, const char *ws_key);
+  CWebSockSession *newSession(unsigned long id, const char *pws_version, const uint8_t *pkey);
 
   /*!
     @brief Remove a websocket session
@@ -591,8 +606,7 @@ public:
     @param id Unique identifier for the websocket session
     @return Pointer to the websocket session or NULL if not found
   */
-  CWebSockSession * getSession(unsigned long id);
-
+  CWebSockSession *getSession(unsigned long id);
 
   /*!
         Generate a random session key from a string key
@@ -607,6 +621,10 @@ public:
     @return True if read OK.
   */
   bool readEncryptionKey(const std::string &path);
+
+  // Getters and setters for encryption key
+  uint8_t *getEncryptionKey() { return m_encryptionKey; };
+  void setEncryptionKey(const uint8_t *key) { memcpy(m_encryptionKey, key, 16); };
 
   //////////////////////////////////////////////////////////////////////////////
   //                                   WS1
@@ -791,10 +809,6 @@ public:
   // Mutex for users
   pthread_mutex_t m_mutex_UserList;
 
-  // Queue
-  // std::list<vscpEvent *> m_sendList;
-  std::list<vscpEvent *> m_receiveList;
-
   // ------------------------------------------------------------------------
 
 private:
@@ -810,13 +824,15 @@ private:
   // TSL key path for the websocket server
   std::string m_key_path;
 
+  // Encryption key
+  uint8_t m_encryptionKey[16];
+
   std::string m_listen_on; // Listen on this address
 
   // Websocket session mutex
   pthread_mutex_t m_mutex_websocketSession;
 
   // List of active websocket sessions
-  // std::list<CWebSockSession *> m_websocketSessions;
   std::map<unsigned long, CWebSockSession *> m_websocketSessionMap; // Key is connection id
 
   struct mg_mgr m_mgr; // Mongoose event manager
