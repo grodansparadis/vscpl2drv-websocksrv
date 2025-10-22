@@ -5,7 +5,7 @@
     "max-out-queue" : 32000,
     "max-in-queue" : 32000,
     "interface" : "8080",
-    "encryption" : "aes256",
+    "encryption" : "aes128",
     "path-users" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/users.json",
     "tls" : {
       "certificate" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/certs/cert.pem",

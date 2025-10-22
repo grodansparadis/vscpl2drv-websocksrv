@@ -748,16 +748,6 @@ public:
   bool m_bEnableREST;    // True to enable REST
   bool m_bEnableStatic;  // True to enable static web pages
 
-  /*
-    If true our own sent events will be received, if
-    false they will be masked. The clientid for
-    the channel is used to detect from whom the events
-    originates. obid will be set to this clientid if
-    it is set to zero on send. The command "CHID" command
-    can be used to get the clientid for the channel.
-  */
-  bool m_bReceiveOwnEvents;
-
   /// Response timeout
   uint32_t m_responseTimeout;
 

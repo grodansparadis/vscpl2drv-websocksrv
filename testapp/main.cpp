@@ -102,7 +102,7 @@ main(int argc, char *argv[])
   // -------------------------------------------------------------
 
   // Now find methods in library
-  spdlog::info("Loading level II driver");
+  spdlog::info("Loading level II driver -");
 
   // Load dynamic library
   hdll = dlopen(s_strDriverPath.c_str(), RTLD_LAZY);

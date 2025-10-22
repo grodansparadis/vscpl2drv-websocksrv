@@ -248,7 +248,17 @@ VSCPWrite(long handle, const vscpEvent *pEvent, unsigned long timeout)
     return CANAL_ERROR_MEMORY;
   }
 
-  pdrvObj->addEvent2SendQueue(pEvent);
+  // Copy event
+  vscpEvent *pEventCopy = new vscpEvent;
+  if (NULL == pEventCopy) {
+    return CANAL_ERROR_MEMORY;
+  }
+
+  // Make copy of event
+  vscp_copyEvent(pEventCopy, pEvent);
+
+  // Let driver own copy (driver will free it)
+  pdrvObj->addEvent2SendQueue(pEventCopy);
 
   return CANAL_ERROR_SUCCESS;
 }

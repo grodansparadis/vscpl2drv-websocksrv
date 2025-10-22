@@ -197,27 +197,29 @@ CWebSockSrv::CWebSockSrv(void)
   // Flush log every five seconds
   spdlog::flush_every(std::chrono::seconds(5));
 
-  auto console = spdlog::stdout_color_mt("console");
+  auto console = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
   // Start out with level=info. Config may change this
   console->set_level(spdlog::level::debug);
   console->set_pattern("[vscpl2drv-websocksrv: %c] [%^%l%$] %v");
-  spdlog::set_default_logger(console);
+  // spdlog::set_default_logger(console);
 
-  console->debug("Starting the vscpl2drv-websocksrv...");
+  // console->debug("Starting the vscpl2drv-websocksrv...");
 
   // Setting up logging defaults
   m_bConsoleLogEnable = true;
   m_consoleLogLevel   = spdlog::level::info;
   m_consoleLogPattern = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
 
-  m_bEnableFileLog   = true;
-  m_fileLogLevel     = spdlog::level::info;
-  m_fileLogPattern   = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
-  m_path_to_log_file = "/var/log/vscp/vscpl2drv-websocksrv.log";
+  m_bEnableFileLog = true;
+  m_fileLogLevel   = spdlog::level::info;
+  m_fileLogPattern = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
+  m_path_to_log_file = "/tmp/vscpl2drv-websocksrv.log";
   m_max_log_size     = 5242880;
   m_max_log_files    = 7;
 
-  m_bReceiveOwnEvents = true; // Receive our own events
+  ////////////////////////////////////////////////////////
+  //      Log files are configured in doLoadConfig      //
+  ////////////////////////////////////////////////////////
 
   // Set default values
   m_url      = "ws://localhost:8000";
@@ -368,24 +370,27 @@ CWebSockSrv::doLoadConfig(std::string &path)
     spdlog::warn("WARNING!!! Default key will be used.");
   }
 
-  // Receive own events
-  if (m_j_config.contains("receive-sent-events") && m_j_config["receive-sent-events"].is_boolean()) {
-    m_bReceiveOwnEvents = m_j_config["receive-sent-events"].get<bool>();
-    if (m_bReceiveOwnEvents) {
-      spdlog::info("Our sent event will be received.");
-    }
-    else {
-      spdlog::info("Our sent events will be masked.");
-    }
-  }
-  else {
-    spdlog::info("Our sent event will be received.");
-  }
-
   // Logging
   if (m_j_config.contains("logging") && m_j_config["logging"].is_object()) {
 
     json j = m_j_config["logging"];
+
+    // Logging: file-logging-enable
+    if (j.contains("file-enable-log")) {
+      try {
+        m_bEnableFileLog = j["file-enable-log"].get<bool>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'file-enable-log' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig:Failed to read 'file-enable-log' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read LOGGING 'file-enable-log' "
+                    "Defaults will be used.");
+    }
 
     // Logging: file-log-level
     if (j.contains("file-log-level")) {
@@ -500,9 +505,90 @@ CWebSockSrv::doLoadConfig(std::string &path)
                     "Defaults will be used.");
     }
 
+    // * * * CONSOLE LOGGING * * *
+
+    // Logging: console-logging-enable
+    if (j.contains("console-enable-log")) {
+      try {
+        m_bConsoleLogEnable = j["console-enable-log"].get<bool>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'console-enable-log' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig:Failed to read 'console-enable-log' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read LOGGING 'console-enable-log' "
+                    "Defaults will be used.");
+    }
+
+    // Logging: console-log-level
+    if (j.contains("console-log-level")) {
+      std::string str;
+      try {
+        str = j["console-log-level"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("[vscpl2drv-websocksrv]Failed to read 'console-log-level' Error='{0}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("[vscpl2drv-websocksrv]Failed to read 'console-log-level' due to unknown error.");
+      }
+      vscp_makeLower(str);
+      if (std::string::npos != str.find("off")) {
+        m_consoleLogLevel = spdlog::level::off;
+      }
+      else if (std::string::npos != str.find("critical")) {
+        m_consoleLogLevel = spdlog::level::critical;
+      }
+      else if (std::string::npos != str.find("err")) {
+        m_consoleLogLevel = spdlog::level::err;
+      }
+      else if (std::string::npos != str.find("warn")) {
+        m_consoleLogLevel = spdlog::level::warn;
+      }
+      else if (std::string::npos != str.find("info")) {
+        m_consoleLogLevel = spdlog::level::info;
+      }
+      else if (std::string::npos != str.find("debug")) {
+        m_consoleLogLevel = spdlog::level::debug;
+      }
+      else if (std::string::npos != str.find("trace")) {
+        m_consoleLogLevel = spdlog::level::trace;
+      }
+      else {
+        spdlog::error("ReadConfig: LOGGING 'console-log-level' has invalid value "
+                      "[{}]. Default value used.",
+                      str);
+      }
+    }
+    else {
+      spdlog::error("ReadConfig: Failed to read LOGGING 'file-log-level' "
+                    "Defaults will be used.");
+    }
+
+    // Logging: console-pattern
+    if (j.contains("console-pattern")) {
+      try {
+        m_consoleLogPattern = j["console-pattern"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'console-pattern' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig:Failed to read 'console-pattern' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read LOGGING 'console-pattern' "
+                    "Defaults will be used.");
+    }
+
   } // Logging
   else {
-    spdlog::error("ReadConfig: No logging has been setup.");
+    spdlog::info("ReadConfig: No logging has been setup.");
   }
 
   ///////////////////////////////////////////////////////////////////////////
@@ -541,9 +627,8 @@ CWebSockSrv::doLoadConfig(std::string &path)
                                                        sinks.end(),
                                                        spdlog::thread_pool(),
                                                        spdlog::async_overflow_policy::block);
-  // The separate sub loggers will handle trace levels
-  logger->set_level(spdlog::level::trace);
   spdlog::register_logger(logger);
+  spdlog::set_default_logger(logger);
 
   // ------------------------------------------------------------------------
 
@@ -1030,7 +1115,7 @@ CWebSockSrv::sendEventToClient(CWebSockSession *pSessionItem, const vscpEvent *p
   //     return VSCP_ERROR_MEMORY;
   //   }
 
-  //mg_ws_send(pSessionItem->getConnection(), (const char *) "halloj", 6, WEBSOCKET_OP_TEXT);
+  // mg_ws_send(pSessionItem->getConnection(), (const char *) "halloj", 6, WEBSOCKET_OP_TEXT);
 
   // vscpEvent *pEvent;
   // pthread_mutex_lock(&pSessionItem->m_mutexInputQueue);
@@ -1043,7 +1128,7 @@ CWebSockSrv::sendEventToClient(CWebSockSession *pSessionItem, const vscpEvent *p
   if (WS_TYPE_1 == pSessionItem->getWsType()) {
     std::string str;
     if (vscp_convertEventToString(str, pEvent)) {
-      spdlog::debug("Received ws event %s", str.c_str());
+      spdlog::debug("Received ws event {}", str.c_str());
       str = ("E;") + str;
       mg_ws_send(pSessionItem->getConnection(), (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
     }
@@ -1051,7 +1136,7 @@ CWebSockSrv::sendEventToClient(CWebSockSession *pSessionItem, const vscpEvent *p
   else if (WS_TYPE_2 == pSessionItem->getWsType()) {
     std::string strEvent;
     vscp_convertEventToJSON(strEvent, pEvent);
-    spdlog::debug("Received ws event %s", strEvent.c_str());
+    spdlog::debug("Received ws event {}", strEvent.c_str());
     std::string str = vscp_str_format(WS2_EVENT, strEvent.c_str());
     mg_ws_send(pSessionItem->getConnection(), (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
   }
@@ -1214,7 +1299,7 @@ CWebSockSrv::postIncomingEvent(void)
             continue;
           }
 
-          // spdlog::debug("Received ws event %s", str.c_str());
+          // spdlog::debug("Received ws event {}", str.c_str());
 
           // Write it out
           if (WS_TYPE_1 == pSession->getWsType()) {
@@ -1609,7 +1694,7 @@ CWebSockSrv::ws1_dataHandler(struct mg_connection *conn, struct mg_ws_message *w
 
       // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
     case WEBSOCKET_OP_TEXT:
-      spdlog::debug("Websocket WS1 - opcode = text[%s]", strWsPkt.c_str());
+      spdlog::debug("Websocket WS1 - opcode = text[{}]", strWsPkt.c_str());
       if (wm->flags & WEBSOCKET_OP_FINAL) {
         // Last part of message - get all parts
         pSession->addConcatenatedString(wm->data);
@@ -2220,7 +2305,7 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
 //   // This is a WS2 type connection
 //   pSession->setWsType(WS_TYPE_2);
 
-//   spdlog::debug("[Websocket ws2] WS2 Connection: client %s", (reject ? "rejected" : "accepted"));
+//   spdlog::debug("[Websocket ws2] WS2 Connection: client {}", (reject ? "rejected" : "accepted"));
 
 //   return reject;
 // }
@@ -2356,7 +2441,7 @@ CWebSockSrv::ws2_dataHandler(struct mg_connection *conn, struct mg_ws_message *w
 
     // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
     case WEBSOCKET_OP_TEXT:
-      spdlog::debug("Websocket WS2 - opcode = text[%s]", strWsPkt.c_str());
+      spdlog::debug("Websocket WS2 - opcode = text[{}]", strWsPkt.c_str());
       if (wm->flags & WEBSOCKET_OP_FINAL) {
         // Last part of message - get all parts
         pSession->addConcatenatedString(wm->data);
@@ -2613,7 +2698,7 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
                 if (VSCP_ERROR_SUCCESS == addEvent2ReceiveQueue(ex)) {
                   str = vscp_str_format(WS2_POSITIVE_RESPONSE, "EVENT", "null");
                   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-                  spdlog::debug("Sent ws2 event %s", strWsPkt.c_str());
+                  spdlog::debug("Sent ws2 event {}", strWsPkt.c_str());
                 }
                 else {
                   str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
@@ -2765,7 +2850,7 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
     return false;
   }
 
-  spdlog::debug("[Websocket ws2] Command = %s", strCmd.c_str());
+  spdlog::debug("[Websocket ws2] Command = {}", strCmd.c_str());
 
   // Get arguments
   std::map<std::string, std::string> argmap;
@@ -3139,7 +3224,7 @@ CWebSockSrv::ws2_xcommand(struct mg_connection *conn, std::string &strCmd)
 //           std::string str;
 //           if (vscp_convertEventToString(str, pEvent)) {
 
-//             spdlog::debug("Received ws event %s", str.c_str());
+//             spdlog::debug("Received ws event {}", str.c_str());
 
 //             // Write it out
 //             if (WS_TYPE_1 == pSession->m_wstypes) {
@@ -3213,7 +3298,7 @@ CWebSockSrv::ws2_xcommand(struct mg_connection *conn, std::string &strCmd)
 //   //         std::string str;
 //   //         if (vscp_convertEventToString(str, pEvent)) {
 
-//           spdlog::debug("Received ws event %s", str.c_str());
+//           spdlog::debug("Received ws event {}", str.c_str());
 
 //   //           // Write it out
 //   //           if (WS_TYPE_1 == pSession->m_wstypes) {
@@ -3685,7 +3770,7 @@ websockWorkerThread(void *pData)
 
   struct mg_mgr mgr; // Event manager
   mg_mgr_init(&mgr); // Initialise event manager
-  spdlog::info("Starting WS listener on %s/websocket\n", pWebSockSrv->getUrl().c_str());
+  spdlog::info("Starting WS listener on {0}/websocket\n", pWebSockSrv->getUrl().c_str());
 
   // Create HTTP listener (websocket object is in conn->fn_data)
   mg_http_listen(&mgr, pWebSockSrv->getUrl().c_str(), websocksrv_event_handler, pWebSockSrv);
@@ -3718,6 +3803,8 @@ websockWorkerThread(void *pData)
 
       // Send event to all clients
       pWebSockSrv->sendEventAllClients(pEvent);
+      vscp_deleteEvent_v2(&pEvent);
+      pEvent = NULL;
     }
   }
 
