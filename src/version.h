@@ -33,22 +33,22 @@
 // I M P O T A N T ! ! ! Lines below must be located at line
 // 35/36/37/38/40/42/43 I M P O T A N T ! ! !
 #define VSCPL2DRV_WEBSOCKSRV_VERSION     1
-#define VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION     0
+#define VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION     1
 #define VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION   0
 #define VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION     0
 
-#define VSCPL2DRV_WEBSOCKSRV_DISPLAY_VERSION   "1.0.0-0"
+#define VSCPL2DRV_WEBSOCKSRV_DISPLAY_VERSION   "1.1.0-0"
 
-#define VSCPL2DRV_WEBSOCKSRV_COPYRIGHT                                                     \
+#define VSCPL2DRV_WEBSOCKSRV_COPYRIGHT                                      \
     "Copyright (C) 2000-2025 Ake Hedman, the VSCP project, "                \
     "https://www.vscp.org"
-#define VSCPL2DRV_WEBSOCKSRV_COPYRIGHT_HTML                                                \
+#define VSCPL2DRV_WEBSOCKSRV_COPYRIGHT_HTML                                 \
     "Copyright (C) 2000-2025 Ake Hedman, <a "                               \
     "href=\"mailto:info@vscp.org\">the VSCP project</a>, <a "               \
     "href=\"https://www.vscp.org\">https://"                                \
     "www.grodansparadis.com</a>"
 
-#define MAKE_VSCPL2DRV_WEBSOCKSRV_VERSION(major, minor, release)                                 \
+#define MAKE_VSCPL2DRV_WEBSOCKSRV_VERSION(major, minor, release)            \
     (((major) << 16) | ((minor) << 8) | (release))
 #endif
 

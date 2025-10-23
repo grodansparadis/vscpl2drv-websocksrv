@@ -20,3 +20,27 @@ some VSCP ws1 websocket commands and then wait for incoming events. User, passwo
 ## test_ws2.js
 node.js code to login on the websocket interface and perform
 some VSCP ws2 websocket commands and then wait for incoming events. User, password and key should be set to default values.
+
+
+## Requirements
+
+* Python 3 with `websockets` and `cryptography` packages installed
+* node.js with `ws` and `crypto` packages installed
+* A running VSCP daemon with websocket interface enabled
+* A web browser for the HTML test
+* Basic knowledge of VSCP and websockets
+  
+### Python
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install websockets
+pip install cryptography
+``` 
+
+### node.js
+
+```bash
+npm install ws
+```

@@ -156,6 +156,13 @@ public:
   int stop(void);
 
   /*!
+    @brief Add event to the input queue
+    @param pEvent Pointer to the VSCP event to add to the input queue
+    @return VSCP_ERROR_SUCCESS on success, otherwise VSCP error code.
+  */
+  int addToInputQueue(const vscpEvent *pEvent);
+
+  /*!
     @brief Generate a random session ID (SID)
   */
   void generateSid(void);
@@ -250,8 +257,8 @@ public:
   bool isOpen(void) { return m_bOpen; };
   void setOpen(bool bOpen) { m_bOpen = bOpen; };
 
-  vscpEventFilter *getFilter(void) { return m_pfilter; };
-  void setFilter(const vscpEventFilter *pfilter) { vscp_copyVSCPFilter(m_pfilter, pfilter); };
+  vscpEventFilter *getFilter(void) { return &m_filter; };
+  void setFilter(const vscpEventFilter *pfilter) { vscp_copyVSCPFilter(&m_filter, pfilter); };
 
   cguid *getGuid() { return &m_guid; };
   void setGuid(const cguid &guid) { m_guid = guid; };
@@ -262,8 +269,10 @@ public:
   bool isAuthenticated(void) { return m_bAuthenticated; };
   void setAuthenticated(bool bAuthenticated) { m_bAuthenticated = bAuthenticated; };
 
+  
+
 public:
-  // Input Queue (events to this client)
+  // Input Queue (events directed to this client)
   std::deque<vscpEvent *> m_inputQueue;
 
   // Semaphore to signal that an event has been received
@@ -304,7 +313,7 @@ private:
   bool m_bOpen;
 
   // Filter/mask for VSCP
-  vscpEventFilter *m_pfilter;
+  vscpEventFilter m_filter;
 
   /*!
       Interface GUID
@@ -533,6 +542,13 @@ public:
     @return VSCP_ERROR_SUCCESS on success, otherwise VSCP error code.
   */
   int sendEventAllClients(const vscpEvent *pEvent);
+
+  /*!
+    @brief Send queued events to a specific client
+    @param pSession Pointer to the websocket session
+    @return VSCP_ERROR_SUCCESS on success, otherwise VSCP error code.
+  */
+  int sendQueueEventsToClient(CWebSockSession *pSession);
 
   /*!
     @brief Send a VSCP event over the websocket connection
@@ -812,6 +828,11 @@ public:
   // ------------------------------------------------------------------------
 
 private:
+
+  bool m_bDebug;  // Debug flag (gives extra debug output)
+
+  uint16_t m_maxClientQueueSize; // Max size of client queues
+
   // URL for the websocket server  ws: or wss:
   std::string m_url;
 

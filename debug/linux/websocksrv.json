@@ -2,13 +2,11 @@
     "debug" : true,
     "write" : false,
     "key-file" : "/etc/vscp/vscp.key",
-    "max-out-queue" : 32000,
-    "max-in-queue" : 32000,
-    "interface" : "9598",
-    "encryption" : "aes128",
+    "max-send-queue" : 32000,
+    "interface" : "ws://localhost:8884",
     "path-users" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/users.json",
-    "receive-sent-events" : true,
     "tls" : {
+      "ca" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/certs/ca.pem",
       "certificate" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/certs/cert.pem",
       "key" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/certs/key.pem"
     },
