@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>VSCP WS2 Web Client</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .row { margin: .75rem 0; }
+    label { display: inline-block; min-width: 180px; }
+    input, button { padding: .5rem .75rem; border: 1px solid #ddd; border-radius: 4px; }
+    input { font-family: monospace; }
+    button { background: #0066cc; color: white; border: none; cursor: pointer; margin-right: 0.5rem; }
+    button:hover { background: #0052a3; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    #log { 
+      white-space: pre-wrap; 
+      background: #1e1e1e; 
+      color: #d4d4d4; 
+      padding: 1rem; 
+      border-radius: 6px; 
+      height: 400px; 
+      overflow: auto; 
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 0.9em;
+      line-height: 1.4;
+    }
+    .success { color: #4ec9b0; }
+    .error { color: #f48771; }
+    .info { color: #9cdcfe; }
+    .event { color: #dcdcaa; }
+    h1 { color: #333; margin-bottom: 1rem; }
+    h3 { color: #555; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+    .button-group { margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>VSCP WS2 Web Client</h1>
+
+    <div class="row">
+      <label>WS URL:</label>
+      <input id="url" size="50" value="ws://localhost:8884/ws2" />
+      <button id="connect">Connect</button>
+      <button id="disconnect" disabled>Disconnect</button>
+    </div>
+
+    <div class="row">
+      <label>Username:</label>
+      <input id="user" value="admin" />
+      <label style="margin-left: 1rem;">Password:</label>
+      <input id="pass" value="secret" type="password" />
+    </div>
+
+    <div class="row">
+      <label>VSCP Key (hex):</label>
+      <input id="keyhex" size="50" value="2DBB079A38985AF00EBEEFE22F9FFA0E" />
+    </div>
+
+    <h3>Commands</h3>
+    <div class="button-group">
+      <button id="noop" disabled>NOOP</button>
+      <button id="version" disabled>VERSION</button>
+      <button id="copyright" disabled>COPYRIGHT</button>
+      <button id="clearQueue" disabled>CLEAR QUEUE</button>
+      <button id="open" disabled>OPEN</button>
+      <button id="close" disabled>CLOSE</button>
+    </div>
+
+    <div class="row" style="margin-top: 1rem;">
+      <label>Send Event - Class:</label>
+      <input id="evtClass" size="5" value="30" />
+      <label>Type:</label>
+      <input id="evtType" size="5" value="5" />
+      <label>Data (comma-separated):</label>
+      <input id="evtData" size="20" value="1,2,3,4,5,6" />
+      <button id="sendEvent" disabled>Send Event</button>
+    </div>
+
+    <h3>Log</h3>
+    <div id="log"></div>
+  </div>
+
+  <script>
+    let ws = null;
+    let isOpen = false;
+    let authenticated = false;
+    let sessionId = null;
+    let authResolver = null;
+
+    const $ = sel => document.querySelector(sel);
+    
+    const log = (msg, type = 'info') => {
+      const el = $('#log');
+      const timestamp = new Date().toLocaleTimeString();
+      const className = type;
+      el.innerHTML += `<span class="${className}">[${timestamp}] ${msg}</span>\n`;
+      el.scrollTop = el.scrollHeight;
+      console.log(msg);
+    };
+
+    function parseMessage(data) {
+      const text = typeof data === 'string' ? data : String(data);
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        log('Failed to parse JSON: ' + text, 'error');
+        return { type: 'UNKNOWN', raw: text };
+      }
+    }
+
+    function encryptAuth(ivHex, keyHex, username, password) {
+      const key = CryptoJS.enc.Hex.parse(keyHex);
+      const iv  = CryptoJS.enc.Hex.parse(ivHex);
+      const creds = CryptoJS.enc.Utf8.parse(`${username}:${password}`);
+      const encrypted = CryptoJS.AES.encrypt(creds, key, {
+        iv,
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.ZeroPadding
+      });
+      return encrypted.ciphertext.toString(CryptoJS.enc.Hex).toUpperCase();
+    }
+
+    function sendJSON(obj) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log('Cannot send, socket not open', 'error');
+        return;
+      }
+      const json = JSON.stringify(obj);
+      log('>> ' + json);
+      ws.send(json);
+    }
+
+    function sendCommand(command, args = {}, timeoutMs = 5000) {
+      return new Promise((resolve, reject) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not open'));
+          return;
+        }
+
+        const cmd = {
+          type: 'CMD',
+          command: command,
+          args: args
+        };
+
+        const onMessage = (evt) => {
+          const msg = parseMessage(evt.data);
+          if ((msg.type === '+' || msg.type === '-') && msg.command === command) {
+            ws.removeEventListener('message', onMessage);
+            clearTimeout(tid);
+            resolve(msg);
+          }
+        };
+
+        const tid = setTimeout(() => {
+          ws.removeEventListener('message', onMessage);
+          reject(new Error(`Timeout waiting for: ${command}`));
+        }, timeoutMs);
+
+        ws.addEventListener('message', onMessage);
+        sendJSON(cmd);
+      });
+    }
+
+    function handleEvent(event) {
+      log(`EVENT: Class=${event.vscpClass} Type=${event.vscpType} GUID=${event.guid} Data=[${event.data}]`, 'event');
+    }
+
+    function handleMessage(data) {
+      const response = parseMessage(data);
+      log('<< ' + JSON.stringify(response));
+
+      // Handle AUTH0 if waiting
+      if (authResolver) {
+        authResolver(response);
+        return;
+      }
+
+      if (response.type === '+') {
+        if (response.command === 'AUTH') {
+          log('✓ Authentication successful', 'success');
+          authenticated = true;
+          enableCommandButtons(true);
+        } else {
+          log(`✓ Success: ${response.command}`, 'success');
+        }
+      } else if (response.type === '-') {
+        log(`✗ Error: ${response.command} - ${JSON.stringify(response.args)}`, 'error');
+      } else if (response.type === 'E') {
+        handleEvent(response.event || response);
+      }
+    }
+
+    function authenticate(sid) {
+      const keyHex = $('#keyhex').value.trim();
+      const user = $('#user').value.trim();
+      const pass = $('#pass').value;
+
+      try {
+        const cipherHex = encryptAuth(sid, keyHex, user, pass);
+        const authCmd = {
+          type: 'CMD',
+          command: 'AUTH',
+          args: {
+            iv: sid,
+            crypto: cipherHex
+          }
+        };
+        sendJSON(authCmd);
+      } catch (e) {
+        log('Auth encryption error: ' + e.message, 'error');
+      }
+    }
+
+    function waitForAuth0() {
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          authResolver = null;
+          reject(new Error('AUTH0 timeout'));
+        }, 5000);
+
+        authResolver = (response) => {
+          // WS2 sends: {"type":"+","command":"AUTH","args":["AUTH0","sid"]}
+          if (response.type === '+' && 
+              response.args && 
+              response.args[0] === 'AUTH0') {
+            clearTimeout(timeout);
+            authResolver = null;
+            sessionId = response.args[1];
+            log('Received AUTH0, SID: ' + sessionId, 'info');
+            authenticate(sessionId);
+            resolve(response);
+          }
+        };
+      });
+    }
+
+    function enableCommandButtons(enabled) {
+      $('#noop').disabled = !enabled;
+      $('#version').disabled = !enabled;
+      $('#copyright').disabled = !enabled;
+      $('#clearQueue').disabled = !enabled;
+      $('#open').disabled = !enabled;
+      $('#close').disabled = !enabled;
+      $('#sendEvent').disabled = !enabled;
+    }
+
+    async function connect() {
+      const url = $('#url').value.trim();
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        log('Already connected/connecting', 'error');
+        return;
+      }
+
+      log('Connecting to ' + url + ' ...');
+      ws = new WebSocket(url);
+      ws.binaryType = 'arraybuffer';
+
+      ws.addEventListener('open', () => {
+        isOpen = true;
+        authenticated = false;
+        sessionId = null;
+        log('Connected to WS2 server', 'success');
+        $('#disconnect').disabled = false;
+        $('#connect').disabled = true;
+
+        // Wait for AUTH0
+        waitForAuth0().catch(err => {
+          log('AUTH0 failed: ' + err.message, 'error');
+        });
+      });
+
+      ws.addEventListener('message', (evt) => {
+        if (typeof evt.data === 'string') {
+          handleMessage(evt.data);
+        } else if (evt.data instanceof ArrayBuffer) {
+          const text = new TextDecoder().decode(new Uint8Array(evt.data));
+          handleMessage(text);
+        }
+      });
+
+      ws.addEventListener('error', (e) => {
+        log('WebSocket error: ' + (e.message || e.type || 'unknown'), 'error');
+      });
+
+      ws.addEventListener('close', (e) => {
+        log(`Closed (${e.code}) ${e.reason || ''}`, 'error');
+        isOpen = false;
+        enableCommandButtons(false);
+        $('#disconnect').disabled = true;
+        $('#connect').disabled = false;
+      });
+    }
+
+    function disconnect() {
+      if (ws) {
+        ws.close();
+        log('Disconnecting...', 'info');
+      }
+    }
+
+    // UI bindings
+    $('#connect').addEventListener('click', connect);
+    $('#disconnect').addEventListener('click', disconnect);
+
+    $('#noop').addEventListener('click', async () => {
+      try { 
+        const resp = await sendCommand('NOOP');
+        log('NOOP → ' + JSON.stringify(resp), 'success'); 
+      } catch (e) { log('NOOP error: ' + e.message, 'error'); }
+    });
+
+    $('#version').addEventListener('click', async () => {
+      try { 
+        const resp = await sendCommand('VERSION');
+        log('VERSION → ' + JSON.stringify(resp), 'success'); 
+      } catch (e) { log('VERSION error: ' + e.message, 'error'); }
+    });
+
+    $('#copyright').addEventListener('click', async () => {
+      try { 
+        const resp = await sendCommand('COPYRIGHT');
+        log('COPYRIGHT → ' + JSON.stringify(resp), 'success'); 
+      } catch (e) { log('COPYRIGHT error: ' + e.message, 'error'); }
+    });
+
+
+    $('#clearQueue').addEventListener('click', async () => {
+      try { 
+        const resp = await sendCommand('CLRQ');
+        log('CLRQ → ' + JSON.stringify(resp), 'success'); 
+      } catch (e) { log('CLRQ error: ' + e.message, 'error'); }
+    });
+
+    $('#open').addEventListener('click', async () => {
+      try { 
+        const resp = await sendCommand('OPEN');
+        log('OPEN → ' + JSON.stringify(resp), 'success'); 
+      } catch (e) { log('OPEN error: ' + e.message, 'error'); }
+    });
+
+    $('#close').addEventListener('click', async () => {
+      try { 
+        const resp = await sendCommand('CLOSE');
+        log('CLOSE → ' + JSON.stringify(resp), 'success'); 
+      } catch (e) { log('CLOSE error: ' + e.message, 'error'); }
+    });
+
+    $('#sendEvent').addEventListener('click', () => {
+      try {
+        const vscpClass = parseInt($('#evtClass').value);
+        const vscpType = parseInt($('#evtType').value);
+        const dataStr = $('#evtData').value.trim();
+        const data = dataStr ? dataStr.split(',').map(v => parseInt(v.trim())) : [];
+
+        const event = {
+          type: 'E',
+          event: {
+            head: 0,
+            vscpClass: vscpClass,
+            vscpType: vscpType,
+            obid: 0,
+            dateTime: new Date().toISOString(),
+            timestamp: 0,
+            guid: 'FF:FF:FF:FF:FF:FF:FF:F5:00:00:00:00:00:02:00:00',
+            data: data,
+            note: 'Test event from WS2 web client'
+          }
+        };
+
+        sendJSON(event);
+        log('Event sent', 'success');
+      } catch (e) {
+        log('Send event error: ' + e.message, 'error');
+      }
+    });
+
+    // Disable buttons initially
+    enableCommandButtons(false);
+  </script>
+</body>
+</html>

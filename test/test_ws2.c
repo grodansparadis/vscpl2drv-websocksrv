@@ -1,12 +1,13 @@
 // Build (Linux):
-//   gcc test_ws1.c mongoose.c -o test_ws1 -lssl -lcrypto -lpthread -ldl
+//   gcc test_ws2.c mongoose.c -o test_ws2 -lssl -lcrypto -lpthread -ldl
 //
 // Run:
-//   ./test_ws1
+//   ./test_ws2
 //
 // Notes:
 // - Requires Mongoose single-file sources (mongoose.c/.h) in the same dir or include path
 // - Requires OpenSSL dev libraries for AES
+// - WS2 uses JSON format instead of semicolon-separated strings
 
 #include "mongoose.h"
 #include <openssl/evp.h>
@@ -16,8 +17,9 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <time.h>
 
-#define WS_URL   "ws://localhost:8884/ws1"
+#define WS_URL   "ws://localhost:8884/ws2"
 #define USERNAME "admin"
 #define PASSWORD "secret"
 // 16-byte shared key (hex, AES-128)
@@ -31,6 +33,10 @@ struct client_state {
   const char *password;
   bool sent_open;
 };
+
+/////////////////////////////////////////////////////////////////////////////////
+// Utility functions
+/////////////////////////////////////////////////////////////////////////////////
 
 /////////////////////////////////////////////////////////////////////////////////
 // log_hex
@@ -104,7 +110,7 @@ aes128_cbc_zeropad_encrypt(const unsigned char key[16],
   unsigned char *padded = NULL, *ct = NULL;
   int ct_len = 0, tmp_len = 0;
 
-  // Zero-pad to 16-byte boundary (no extra block if already aligned)
+  // Zero-pad to 16-byte boundary
   size_t padded_len = ((in_len + 15) / 16) * 16;
   padded            = (unsigned char *) calloc(1, padded_len ? padded_len : 16);
   if (!padded)
@@ -118,7 +124,6 @@ aes128_cbc_zeropad_encrypt(const unsigned char key[16],
 
   if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_128_cbc(), NULL, key, iv))
     goto done;
-  // Disable PKCS#7 padding; we already zero-padded
   EVP_CIPHER_CTX_set_padding(ctx, 0);
 
   ct = (unsigned char *) malloc(padded_len + 16);
@@ -147,14 +152,28 @@ done:
 }
 
 /////////////////////////////////////////////////////////////////////////////////
-// send_text
+// send_json
 //
 
 static void
-send_text(struct mg_connection *c, const char *s)
+send_json(struct mg_connection *c, const char *json)
 {
-  printf(">> %s\n", s);
-  mg_ws_printf(c, WEBSOCKET_OP_TEXT, "%s", s);
+  printf(">> %s\n", json);
+  mg_ws_printf(c, WEBSOCKET_OP_TEXT, "%s", json);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// sendClose
+//
+
+static void
+sendClose(void *arg)
+{
+  struct mg_connection *c = (struct mg_connection *) (uintptr_t) arg;
+  if (c) {
+    printf("\n=== Sending CLOSE command ===\n");
+    send_json(c, "{\"type\":\"CMD\",\"command\":\"CLOSE\",\"args\":{}}");
+  }
 }
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -189,9 +208,14 @@ handle_auth0(struct mg_connection *c, struct client_state *st, const char *sid_h
   bin2hex_upper(ct, ct_len, ct_hex, sizeof(ct_hex));
   free(ct);
 
-  char cmd[1200];
-  snprintf(cmd, sizeof(cmd), "C;AUTH;%s;%s", sid_hex, ct_hex);
-  send_text(c, cmd);
+  // Build JSON: {"type":"CMD","command":"AUTH","args":{"iv":"...","crypto":"..."}}
+  char cmd[2048];
+  snprintf(cmd,
+           sizeof(cmd),
+           "{\"type\":\"CMD\",\"command\":\"AUTH\",\"args\":{\"iv\":\"%s\",\"crypto\":\"%s\"}}",
+           sid_hex,
+           ct_hex);
+  send_json(c, cmd);
 }
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -201,47 +225,70 @@ handle_auth0(struct mg_connection *c, struct client_state *st, const char *sid_h
 static void
 on_ws_msg(struct mg_connection *c, struct client_state *st, struct mg_ws_message *wm)
 {
+  static int cnt = 0;  // Receive event counter
   // Convert to string
   struct mg_str s = wm->data;
   char *msg       = (char *) malloc(s.len + 1);
-  if (!msg)
+  if (!msg) {
     return;
+  }
+
   memcpy(msg, s.buf, s.len);
   msg[s.len] = 0;
   printf("<< %s\n", msg);
 
-  // Parse: TYPE;CMD;params...
-  // Expect: +;AUTH0;sid or +;AUTH1;...
-  char *saveptr = NULL;
-  char *type    = strtok_r(msg, ";", &saveptr);
-  char *cmd     = strtok_r(NULL, ";", &saveptr);
+  // Parse JSON using Mongoose's built-in parser
+  struct mg_str json = mg_str(msg);
 
-  if (type && cmd) {
-    if (strcmp(type, "+") == 0 && strcmp(cmd, "AUTH0") == 0) {
-      char *sid = strtok_r(NULL, ";", &saveptr);
-      if (sid)
+  // Get type field
+  char *type = mg_json_get_str(json, "$.type");
+
+  // Get command field
+  char *command = mg_json_get_str(json, "$.command");
+
+  // Check for AUTH0: {"type":"+","command":null,"args":["AUTH0","sid"]}
+  if (strcmp(type, "+") == 0 && command == NULL) {
+    // Get first arg
+    char *arg0 = mg_json_get_str(json, "$.args[0]" /*, NULL, 0*/);
+    if (strcmp(arg0, "AUTH0") == 0) {
+      // Get SID (second arg)
+      char *sid = mg_json_get_str(json, "$.args[1]");
+      if (sid) {
+        printf("Received AUTH0, SID: %s\n", sid);
         handle_auth0(c, st, sid);
-    }
-    else if (strcmp(type, "+") == 0 && strcmp(cmd, "AUTH1") == 0) {
-      st->authenticated = true;
-      printf("Authenticated.\n");
-      // Send some demo commands
-      send_text(c, "C;NOOP");
-      send_text(c, "C;VERSION");
-      if (!st->sent_open) {
-        send_text(c, "C;OPEN");
-        st->sent_open = true;
       }
     }
-    else if (strcmp(type, "-") == 0) {
-      // Error reply
-      printf("Error reply: %s\n", cmd);
+  }
+  else if (strcmp(type, "+") == 0 && strcmp(command, "AUTH") == 0) {
+    st->authenticated = true;
+    printf("✓ Authenticated successfully\n");
+
+    // Send demo commands
+    send_json(c, "{\"type\":\"CMD\",\"command\":\"NOOP\",\"args\":{}}");
+    send_json(c, "{\"type\":\"CMD\",\"command\":\"VERSION\",\"args\":{}}");
+    send_json(c, "{\"type\":\"CMD\",\"command\":\"COPYRIGHT\",\"args\":{}}");
+
+    if (!st->sent_open) {
+      send_json(c, "{\"type\":\"CMD\",\"command\":\"OPEN\",\"args\":{}}");
+      st->sent_open = true;
     }
-    else if (strcmp(type, "E") == 0) {
-      // Event line (entire event is rest of string)
-      // Example: E;head,class,type,obid,datetime,timestamp,guid,data...
-      printf("Event: %s\n", (cmd ? cmd : ""));
-    }
+  }
+  else if (strcmp(type, "+") == 0 && strcmp(command, "EVENT") == 0) {
+    // Event
+    printf("📬 Event sent\n");
+  }
+  else if (strcmp(type, "+") == 0) {
+    // Success response
+    printf("✓ Success: %s\n", command);
+  }
+  else if (strcmp(type, "-") == 0) {
+    // Error reply
+    printf("✗ Error reply: %s\n", command);
+  }
+  else if (strcmp(type, "EVENT") == 0) {
+    // Event
+    printf("📬 Event received %d\n", cnt++);
+    // Could parse event.vscpClass, event.vscpType, etc.
   }
 
   free(msg);
@@ -258,20 +305,18 @@ fn(struct mg_connection *c, int ev, void *ev_data)
 
   switch (ev) {
     case MG_EV_OPEN:
-      // TCP connected
       break;
-
     case MG_EV_ERROR:
       printf("MG_EV_ERROR: %s\n", (char *) ev_data);
       break;
     case MG_EV_WS_OPEN:
-      printf("WebSocket opened: %s\n", WS_URL);
+      printf("✓ Connected to WS2 server: %s\n", WS_URL);
       break;
     case MG_EV_WS_MSG:
       on_ws_msg(c, st, (struct mg_ws_message *) ev_data);
       break;
     case MG_EV_CLOSE:
-      printf("Connection closed\n");
+      printf("❌ Connection closed\n");
       break;
     default:
       break;
@@ -309,9 +354,39 @@ main(void)
 
   printf("Connecting to %s ...\n", WS_URL);
 
+  // After authentication, send an event after 3 seconds
+  uint64_t event_time = 0;
+  bool event_sent     = false;
+
   // Poll loop (Ctrl+C to exit)
   for (;;) {
     mg_mgr_poll(&mgr, 100);
+
+    // Send test event 3 seconds after authentication
+    if (st.authenticated && !event_sent) {
+      if (event_time == 0) {
+        event_time = mg_millis();
+      }
+      else if (mg_millis() - event_time > 3000) {
+        printf("\n=== Sending test event ===\n");
+        const char *event_json = "{\"type\":\"EVENT\",\"event\":{"
+                                 "\"head\":0,"
+                                 "\"vscpClass\":30,"
+                                 "\"vscpType\":5,"
+                                 "\"obid\":0,"
+                                 "\"dateTime\":\"2025-01-01T00:00:00Z\","
+                                 "\"timestamp\":0,"
+                                 "\"guid\":\"FF:FF:FF:FF:FF:FF:FF:F5:00:00:00:00:00:02:00:00\","
+                                 "\"data\":[1,2,3,4,5,6],"
+                                 "\"note\":\"Test event from WS2 C client\""
+                                 "}}";
+        send_json(c, event_json);
+        event_sent = true;
+
+        // Send CLOSE command after 10 more seconds
+        mg_timer_add(&mgr, 10000, 0, sendClose, (void *) (uintptr_t) c);
+      }
+    }
   }
 
   // Never reached

@@ -29,6 +29,9 @@ class VSCPWebSocketClient {
                       perMessageDeflate: false
                 });
 
+      // Wait for AUTH0
+      this.waitForAuth().then(resolve).catch(reject);          
+
       this.ws.on('open', () => {
         console.log('✓ Connected to WebSocket server');
         this.isOpen = true;
@@ -49,8 +52,7 @@ class VSCPWebSocketClient {
         this.isOpen = false;
       });
 
-      // Wait for AUTH0
-      this.waitForAuth().then(resolve).catch(reject);
+      
     });
   }
 

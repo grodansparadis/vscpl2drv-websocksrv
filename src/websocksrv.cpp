@@ -355,16 +355,12 @@ CWebSockSrv::open(std::string &path, const uint8_t *pguid)
     return rv;
   }
 
-  spdlog::debug("---> Open");
-
   // Start the server
   if (VSCP_ERROR_SUCCESS != start()) {
     spdlog::critical("Failed to start server.");
     spdlog::drop_all();
     return VSCP_ERROR_INIT_FAIL;
   }
-
-  spdlog::debug("Open <---");
 
   // Everything is OK
   m_bQuit = false;
@@ -748,7 +744,7 @@ CWebSockSrv::doLoadConfig(std::string &path)
   if (m_j_config.contains("mongoose-debug")) {
     try {
       bool bMongooseDebug = m_j_config["mongoose-debug"].get<bool>();
-      //mongoose.set("debug", bMongooseDebug);
+      // mongoose.set("debug", bMongooseDebug);
       if (bMongooseDebug) {
         mg_log_set(MG_LL_DEBUG);
       }
@@ -1032,8 +1028,6 @@ CWebSockSrv::doLoadConfig(std::string &path)
   logger->set_level(m_fileLogLevel);
 
   // ------------------------------------------------------------------------
-
-  
 
   // vscpEvent ev;
   // ev.vscp_class = VSCP_CLASS2_HLO;
@@ -2129,7 +2123,9 @@ CWebSockSrv::ws1_message(struct mg_connection *conn, std::string &strWsPkt)
         ex.obid = conn->id; // Set the obid
         if (VSCP_ERROR_SUCCESS == addEvent2ReceiveQueue(ex)) {
           mg_ws_send(conn, (const char *) "+;EVENT", 7, WEBSOCKET_OP_TEXT);
-          spdlog::debug("[websocket ws1] Received ws1 event {0} from client {1}", strWsPkt.c_str(), pSession->getConnection()->id);
+          spdlog::debug("[websocket ws1] Received ws1 event {0} from client {1}",
+                        strWsPkt.c_str(),
+                        pSession->getConnection()->id);
         }
         else {
           str = vscp_str_format(("-;%d;%s"), (int) WEBSOCK_ERROR_TX_BUFFER_FULL, WEBSOCK_STR_ERROR_TX_BUFFER_FULL);
@@ -2629,6 +2625,7 @@ CWebSockSrv::ws2_readyHandler(struct mg_connection *conn, void *cbdata)
   */
   std::string str = vscp_str_format(WS2_AUTH0_TEMPLATE, pSession->getSid());
   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
+  spdlog::debug("[Websocket ws2] WS2 AUTH0: client {}", pSession->getSid());
 
   pSession->setConnState(WEBSOCK_CONN_STATE_DATA);
 }
@@ -3322,11 +3319,11 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
 
     // std::string strvalue;
     std::string strResult;
-    // strResult = vscp_str_format("{ \"version\" : \"%d.%d.%d-%d\" }",
-    //                             VSCPD_MAJOR_VERSION,
-    //                             VSCPD_MINOR_VERSION,
-    //                             VSCPD_RELEASE_VERSION,
-    //                             VSCPD_BUILD_VERSION);
+    strResult = vscp_str_format("{ \"version\" : \"%d.%d.%d-%d\" }",
+                                VSCPL2DRV_WEBSOCKSRV_VERSION,
+                                VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION,
+                                VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION,
+                                VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION);
     // Positive reply
     std::string str = vscp_str_format(WS2_POSITIVE_RESPONSE, strCmd.c_str(), strResult.c_str());
     mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
