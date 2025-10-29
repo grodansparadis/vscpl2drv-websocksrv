@@ -127,7 +127,7 @@ CWebSockSession::CWebSockSession(void)
   pthread_mutex_init(&m_mutexInputQueue, NULL);
 };
 
-CWebSockSession::~CWebSockSession(void) 
+CWebSockSession::~CWebSockSession(void)
 {
   // Clear the input queue
   pthread_mutex_lock(&m_mutexInputQueue);
@@ -241,13 +241,10 @@ CWebSockSrv::CWebSockSrv(void)
   m_bQuit = false;
 
   vscp_clearVSCPFilter(&m_rxfilter); // Accept all events
-  vscp_clearVSCPFilter(&m_txfilter); // Send all events
-
-  m_responseTimeout = WEBSOCKETSRV_DEFAULT_INNER_RESPONSE_TIMEOUT;
 
   m_websockWorkerThread = 0;
   m_bDebug              = false;
-  m_maxClientQueueSize  = 1024;
+  m_maxClientQueueSize  = MAX_ITEMS_IN_QUEUE;
 
   // Initialise semaphores
   sem_init(&m_semSendQueue, 0, 0);
@@ -266,21 +263,18 @@ CWebSockSrv::CWebSockSrv(void)
   // Flush log every five seconds
   spdlog::flush_every(std::chrono::seconds(5));
 
-  auto console = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+  auto console_start = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
   // Start out with level=info. Config may change this
-  console->set_level(spdlog::level::debug);
-  console->set_pattern("[vscpl2drv-websocksrv: %c] [%^%l%$] %v");
-  // spdlog::set_default_logger(console);
-
-  // console->debug("Starting the vscpl2drv-websocksrv...");
+  console_start->set_level(spdlog::level::debug);
+  console_start->set_pattern("[vscpl2drv-websocksrv: %c] [%^%l%$] %v");
 
   // Setting up logging defaults
   m_bConsoleLogEnable = true;
-  m_consoleLogLevel   = spdlog::level::info;
+  m_consoleLogLevel   = spdlog::level::debug;
   m_consoleLogPattern = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
 
   m_bEnableFileLog   = true;
-  m_fileLogLevel     = spdlog::level::info;
+  m_fileLogLevel     = spdlog::level::debug;
   m_fileLogPattern   = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
   m_path_to_log_file = "/tmp/vscpl2drv-websocksrv.log";
   m_max_log_size     = 5242880;
@@ -294,20 +288,28 @@ CWebSockSrv::CWebSockSrv(void)
   m_url      = "ws://localhost:8884";
   m_web_root = ".";
 #ifdef WIN32
+  m_tls_ca_path          = "";
   m_tls_certificate_path = "c:/vscp/certs/cert.pem";
   m_tls_private_key_path = "c:/vscp/certs/key.pem";
 #else
+  m_tls_ca_path          = "";
   m_tls_certificate_path = "/etc/vscp/certs/cert.pem";
   m_tls_private_key_path = "/etc/vscp/certs/key.pem";
 #endif
 
   m_maxClients    = 100;  // Max clients
   m_bEnableWS1    = true; // Enable ws1
+  m_url_ws1       = "/ws1";
   m_bEnableWS2    = true; // Enable ws2
+  m_url_ws2       = "/ws2";
   m_bEnableREST   = true; // Enable REST
+  m_url_rest      = "/rest";
   m_bEnableStatic = true; // Enable static web pages
 
   m_mgr = {}; // Initialize mongoose event manager
+
+  // Mongoose just log errors (config mongoose-debug)
+  mg_log_set(MG_LL_ERROR);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -463,7 +465,313 @@ CWebSockSrv::doLoadConfig(std::string &path)
     spdlog::error("ReadConfig: Failed to read 'interface' Defaults ({0}) will be used.", m_url);
   }
 
-  // Logging
+  // interface
+  if (m_j_config.contains("interface")) {
+    try {
+      m_interface = m_j_config["interface"].get<std::string>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'interface' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'interface' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'interface' Defaults will be used.");
+  }
+
+  // Receive filter
+  if (m_j_config.contains("rx-filter")) {
+    try {
+      std::string filter = m_j_config["rx-filter"].get<std::string>();
+      if (!vscp_readFilterFromString(&m_rxfilter, filter.c_str())) {
+        spdlog::error("ReadConfig: Failed to parse 'rx-filter' filter='{}'", filter);
+      }
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'rx-filter' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'rx-filter' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'rx-filter' Defaults will be used.");
+  }
+
+  // max client queue size
+  if (m_j_config.contains("max-client-queue-size")) {
+    try {
+      m_maxClientQueueSize = m_j_config["max-client-queue-size"].get<uint32_t>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'max-client-queue-size' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'max-client-queue-size' due to unknown error.");
+    }
+  }
+
+  if (m_j_config.contains("url-ws1")) {
+    try {
+      m_url_ws1 = m_j_config["url-ws1"].get<std::string>();
+      vscp_trim(m_url_ws1);
+      // Verify that first character is "/"
+      if (m_url_ws1.front() != '/') {
+        m_url_ws1 = "/" + m_url_ws1;
+      }
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'url-ws1' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'url-ws1' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'url-ws1' Defaults will be used.");
+  }
+
+  if (m_j_config.contains("url-ws2")) {
+    try {
+      m_url_ws2 = m_j_config["url-ws2"].get<std::string>();
+      vscp_trim(m_url_ws2);
+      // Verify that first character is "/"
+      if (m_url_ws2.front() != '/') {
+        m_url_ws2 = "/" + m_url_ws2;
+      }
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'url-ws2' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'url-ws2' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'url-ws2' Defaults will be used.");
+  }
+
+  if (m_j_config.contains("url-rest")) {
+    try {
+      m_url_rest = m_j_config["url-rest"].get<std::string>();
+      vscp_trim(m_url_rest);
+      // Verify that first character is "/"
+      if (m_url_rest.front() != '/') {
+        m_url_rest = "/" + m_url_rest;
+      }
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'url-rest' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'url-rest' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'url-rest' Defaults will be used.");
+  }
+
+  if (m_j_config.contains("web-root")) {
+    try {
+      m_web_root = m_j_config["web-root"].get<std::string>();
+      vscp_trim(m_web_root);
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'web-root' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'web-root' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'web-root' Defaults will be used.");
+  }
+
+  // Root directory must not contain double dots. Make it absolute
+  // Do the conversion only if the root dir spec does not contain overrides
+  // char ppath[MG_PATH_MAX];
+  // if (strchr(m_web_root.c_str(), ',') == NULL) {
+  //   realpath(m_web_root.c_str(), ppath);
+  //   m_web_root = ppath;
+  // }
+
+  MG_INFO(("Mongoose version : v%s", MG_VERSION));
+  MG_INFO(("Listening on     : %s", m_interface.c_str()));
+  MG_INFO(("Web root         : %s", m_web_root.c_str()));
+
+  // Path to user database
+  if (m_j_config.contains("path-users")) {
+    try {
+      m_pathUsers = m_j_config["path-users"].get<std::string>();
+      if (!m_userList.loadUsersFromFile(m_pathUsers)) {
+        spdlog::critical("ReadConfig: Failed to load users from file "
+                         "'user-path'='{}'. Terminating!",
+                         path);
+        return false;
+      }
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'path-users' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'path-users' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'path-users' Defaults will be used.");
+  }
+
+  // Max number of clients 0 == unlimited
+  if (m_j_config.contains("max-clients")) {
+    try {
+      m_maxClients = m_j_config["max-clients"].get<uint16_t>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'max-clients' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'max-clients' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'max-clients' Defaults will be used.");
+  }
+
+  // Enable ws1
+  if (m_j_config.contains("enable-ws1")) {
+    try {
+      m_bEnableWS1 = m_j_config["enable-ws1"].get<bool>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'enable-ws1' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'enable-ws1' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'enable-ws1' Defaults will be used.");
+  }
+
+  // Enable ws2
+  if (m_j_config.contains("enable-ws2")) {
+    try {
+      m_bEnableWS2 = m_j_config["enable-ws2"].get<bool>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'enable-ws2' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'enable-ws2' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'enable-ws2' Defaults will be used.");
+  }
+
+  // Enable REST
+  if (m_j_config.contains("enable-rest")) {
+    try {
+      m_bEnableREST = m_j_config["enable-rest"].get<bool>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'enable-rest' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'enable-rest' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'enable-rest' Defaults will be used.");
+  }
+
+  // Enable static web
+  if (m_j_config.contains("enable-static")) {
+    try {
+      m_bEnableStatic = m_j_config["enable-static"].get<bool>();
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig: Failed to read 'enable-static' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig: Failed to read 'enable-static' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::warn("ReadConfig: Failed to read 'enable-static' Defaults will be used.");
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  //                          TLS / SSL
+  ///////////////////////////////////////////////////////////////////////////
+
+  if (m_j_config.contains("tls") && m_j_config["tls"].is_object()) {
+
+    json j = m_j_config["tls"];
+
+    // Certificate
+    if (j.contains("certificate")) {
+      try {
+        m_tls_certificate_path = j["certificate"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'certificate' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'certificate' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'certificate' Defaults will be used.");
+    }
+
+    // private key
+    if (j.contains("key")) {
+      try {
+        m_tls_private_key_path = j["key"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig:Failed to read 'key' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig:Failed to read 'key' due to unknown error.");
+      }
+    }
+    else {
+      spdlog::debug("ReadConfig: Failed to read 'key' Defaults will be used.");
+    }
+  }
+
+  //  mongoose debugging
+  if (m_j_config.contains("mongoose-debug")) {
+    try {
+      bool bMongooseDebug = m_j_config["mongoose-debug"].get<bool>();
+      //mongoose.set("debug", bMongooseDebug);
+      if (bMongooseDebug) {
+        mg_log_set(MG_LL_DEBUG);
+      }
+      else {
+        mg_log_set(MG_LL_ERROR);
+      }
+    }
+    catch (const std::exception &ex) {
+      spdlog::error("ReadConfig:Failed to read 'mongoose-debug' Error='{}'", ex.what());
+    }
+    catch (...) {
+      spdlog::error("ReadConfig:Failed to read 'mongoose-debug' due to unknown error.");
+    }
+  }
+  else {
+    spdlog::debug("ReadConfig: Failed to read 'mongoose-debug' "
+                  "Defaults will be used.");
+  }
+
+  ///////////////////////////////////////////////////////////////////////////
+  //                          logging
+  ///////////////////////////////////////////////////////////////////////////
+
   if (m_j_config.contains("logging") && m_j_config["logging"].is_object()) {
 
     json j = m_j_config["logging"];
@@ -690,6 +998,7 @@ CWebSockSrv::doLoadConfig(std::string &path)
 
   // Console log
   auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+
   if (m_bConsoleLogEnable) {
     console_sink->set_level(m_consoleLogLevel);
     console_sink->set_pattern(m_consoleLogPattern);
@@ -699,9 +1008,6 @@ CWebSockSrv::doLoadConfig(std::string &path)
     console_sink->set_level(spdlog::level::off);
   }
 
-  // auto rotating =
-  // std::make_shared<spdlog::sinks::rotating_file_sink_mt>("log_filename",
-  // 1024*1024, 5, false);
   auto rotating_file_sink =
     std::make_shared<spdlog::sinks::rotating_file_sink_mt>(m_path_to_log_file.c_str(), m_max_log_size, m_max_log_files);
 
@@ -723,254 +1029,11 @@ CWebSockSrv::doLoadConfig(std::string &path)
   spdlog::register_logger(logger);
   spdlog::set_default_logger(logger);
 
+  logger->set_level(m_fileLogLevel);
+
   // ------------------------------------------------------------------------
 
-  // interface
-  if (m_j_config.contains("interface")) {
-    try {
-      m_interface = m_j_config["interface"].get<std::string>();
-    }
-    catch (const std::exception &ex) {
-      spdlog::error("ReadConfig: Failed to read 'interface' Error='{}'", ex.what());
-    }
-    catch (...) {
-      spdlog::error("ReadConfig: Failed to read 'interface' due to unknown error.");
-    }
-  }
-  else {
-    spdlog::warn("ReadConfig: Failed to read 'interface' Defaults will be used.");
-  }
-
-  // Path to user database
-  if (m_j_config.contains("path-users")) {
-    try {
-      m_pathUsers = m_j_config["path-users"].get<std::string>();
-      if (!m_userList.loadUsersFromFile(m_pathUsers)) {
-        spdlog::critical("ReadConfig: Failed to load users from file "
-                         "'user-path'='{}'. Terminating!",
-                         path);
-        return false;
-      }
-    }
-    catch (const std::exception &ex) {
-      spdlog::error("ReadConfig: Failed to read 'path-users' Error='{}'", ex.what());
-    }
-    catch (...) {
-      spdlog::error("ReadConfig: Failed to read 'path-users' due to unknown error.");
-    }
-  }
-  else {
-    spdlog::warn("ReadConfig: Failed to read 'path-users' Defaults will be used.");
-  }
-
-  // Max number of clients
-  if (m_j_config.contains("max-clients")) {
-    try {
-      m_maxClients = m_j_config["max-clients"].get<uint16_t>();
-    }
-    catch (const std::exception &ex) {
-      spdlog::error("ReadConfig: Failed to read 'max-clients' Error='{}'", ex.what());
-    }
-    catch (...) {
-      spdlog::error("ReadConfig: Failed to read 'max-clients' due to unknown error.");
-    }
-  }
-  else {
-    spdlog::warn("ReadConfig: Failed to read 'max-clients' Defaults will be used.");
-  }
-
-  // Enable ws1
-  if (m_j_config.contains("enable-ws1")) {
-    try {
-      m_bEnableWS1 = m_j_config["enable-ws1"].get<bool>();
-    }
-    catch (const std::exception &ex) {
-      spdlog::error("ReadConfig: Failed to read 'enable-ws1' Error='{}'", ex.what());
-    }
-    catch (...) {
-      spdlog::error("ReadConfig: Failed to read 'enable-ws1' due to unknown error.");
-    }
-  }
-  else {
-    spdlog::warn("ReadConfig: Failed to read 'enable-ws1' Defaults will be used.");
-  }
-
-  // Enable ws2
-  if (m_j_config.contains("enable-ws2")) {
-    try {
-      m_bEnableWS2 = m_j_config["enable-ws2"].get<bool>();
-    }
-    catch (const std::exception &ex) {
-      spdlog::error("ReadConfig: Failed to read 'enable-ws2' Error='{}'", ex.what());
-    }
-    catch (...) {
-      spdlog::error("ReadConfig: Failed to read 'enable-ws2' due to unknown error.");
-    }
-  }
-  else {
-    spdlog::warn("ReadConfig: Failed to read 'enable-ws2' Defaults will be used.");
-  }
-
-  // Enable REST
-  if (m_j_config.contains("enable-rest")) {
-    try {
-      m_bEnableREST = m_j_config["enable-rest"].get<bool>();
-    }
-    catch (const std::exception &ex) {
-      spdlog::error("ReadConfig: Failed to read 'enable-rest' Error='{}'", ex.what());
-    }
-    catch (...) {
-      spdlog::error("ReadConfig: Failed to read 'enable-rest' due to unknown error.");
-    }
-  }
-  else {
-    spdlog::warn("ReadConfig: Failed to read 'enable-rest' Defaults will be used.");
-  }
-
-  // Enable static web
-  if (m_j_config.contains("enable-static")) {
-    try {
-      m_bEnableStatic = m_j_config["enable-static"].get<bool>();
-    }
-    catch (const std::exception &ex) {
-      spdlog::error("ReadConfig: Failed to read 'enable-static' Error='{}'", ex.what());
-    }
-    catch (...) {
-      spdlog::error("ReadConfig: Failed to read 'enable-static' due to unknown error.");
-    }
-  }
-  else {
-    spdlog::warn("ReadConfig: Failed to read 'enable-static' Defaults will be used.");
-  }
-
-  // Response timeout m_responseTimeout
-  if (m_j_config.contains("response-timeout")) {
-    try {
-      m_responseTimeout = m_j_config["response-timeout"].get<uint32_t>();
-    }
-    catch (const std::exception &ex) {
-      spdlog::error("ReadConfig: Failed to read 'response-timeout' Error='{}'", ex.what());
-    }
-    catch (...) {
-      spdlog::error("ReadConfig: Failed to read 'response-timeout' due to unknown error.");
-    }
-  }
-  else {
-    spdlog::warn("ReadConfig: Failed to read 'response-timeout' Defaults will be used.");
-  }
-
-  // Filter
-  if (m_j_config.contains("filter") && m_j_config["filter"].is_object()) {
-
-    json j = m_j_config["filter"];
-
-    // IN filter
-    if (j.contains("in-filter")) {
-      try {
-        std::string str = j["in-filter"].get<std::string>();
-        vscp_readFilterFromString(&m_rxfilter, str.c_str());
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig: Failed to read 'in-filter' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig: Failed to read 'in-filter' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'in-filter' Defaults "
-                    "will be used.");
-    }
-
-    // IN mask
-    if (j.contains("in-mask")) {
-      try {
-        std::string str = j["in-mask"].get<std::string>();
-        vscp_readMaskFromString(&m_rxfilter, str.c_str());
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig: Failed to read 'in-mask' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig: Failed to read 'in-mask' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'in-mask' Defaults will be used.");
-    }
-
-    // OUT filter
-    if (j.contains("out-filter")) {
-      try {
-        std::string str = j["in-filter"].get<std::string>();
-        vscp_readFilterFromString(&m_txfilter, str.c_str());
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig: Failed to read 'out-filter' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig: Failed to read 'out-filter' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'out-filter' Defaults will be used.");
-    }
-
-    // OUT mask
-    if (j.contains("out-mask")) {
-      try {
-        std::string str = j["out-mask"].get<std::string>();
-        vscp_readMaskFromString(&m_txfilter, str.c_str());
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig: Failed to read 'out-mask' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig: Failed to read 'out-mask' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'out-mask' Defaults will be used.");
-    }
-  }
-
-  // TLS / SSL
-  if (m_j_config.contains("tls") && m_j_config["tls"].is_object()) {
-
-    json j = m_j_config["tls"];
-
-    // Certificate
-    if (j.contains("certificate")) {
-      try {
-        m_tls_certificate_path = j["certificate"].get<std::string>();
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig: Failed to read 'certificate' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig: Failed to read 'certificate' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'certificate' Defaults will be used.");
-    }
-
-    // private key
-    if (j.contains("key")) {
-      try {
-        m_tls_private_key_path = j["key"].get<std::string>();
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("ReadConfig:Failed to read 'key' Error='{}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("ReadConfig:Failed to read 'key' due to unknown error.");
-      }
-    }
-    else {
-      spdlog::debug("ReadConfig: Failed to read 'key' Defaults will be used.");
-    }
-  }
+  
 
   // vscpEvent ev;
   // ev.vscp_class = VSCP_CLASS2_HLO;
@@ -1011,6 +1074,8 @@ CWebSockSrv::doLoadConfig(std::string &path)
   // ev.sizeData = 16 + 1 + (uint16_t)j.dump().length();
 
   // handleHLO(&ev);
+
+  spdlog::debug("Read configuration");
 
   return VSCP_ERROR_SUCCESS;
 }
@@ -1099,6 +1164,11 @@ int
 CWebSockSrv::addEvent2SendQueue(const vscpEvent *pEvent)
 {
   pthread_mutex_lock(&m_mutexSendQueue);
+  if (!m_maxClientQueueSize && (m_sendQueue.size() >= m_maxClientQueueSize)) {
+    pthread_mutex_unlock(&m_mutexSendQueue);
+    spdlog::warn("Send queue full, dropping event.");
+    return VSCP_ERROR_FIFO_FULL;
+  }
   m_sendQueue.push_back((vscpEvent *) pEvent);
   sem_post(&m_semSendQueue);
   pthread_mutex_unlock(&m_mutexSendQueue);
@@ -1209,6 +1279,8 @@ CWebSockSrv::sendEventToClient(CWebSockSession *pSessionItem, const vscpEvent *p
   //     return VSCP_ERROR_MEMORY;
   //   }
 
+  spdlog::debug("Sending event to client {}", pSessionItem->getConnection()->id);
+
   // Write it out
   if (WS_TYPE_1 == pSessionItem->getWsType()) {
     std::string str;
@@ -1248,9 +1320,6 @@ CWebSockSrv::sendEventAllClients(const vscpEvent *pEvent)
     CWebSockSession *pSessionItem = it->second;
 
     if (NULL != pSessionItem) {
-      if (m_j_config.contains("debug") && m_j_config["debug"].get<bool>()) {
-        spdlog::debug("Send event to client {}", pSessionItem->getConnection()->id);
-      }
       int rv;
       if (VSCP_ERROR_SUCCESS != (rv = sendEventToClient(pSessionItem, pEvent))) {
         if (VSCP_ERROR_NOT_OPEN == rv) {
@@ -1604,6 +1673,23 @@ CWebSockSrv::newSession(unsigned long id, const char *pws_version, const uint8_t
 {
   CWebSockSession *pSession = NULL;
 
+  // Check pointers
+  if (NULL == pws_version) {
+    spdlog::error("[Websockets] New session: Invalid protocol version pointer.");
+    return NULL;
+  }
+
+  if (NULL == pkey) {
+    spdlog::error("[Websockets] New session: Invalid encryption key pointer.");
+    return NULL;
+  }
+
+  // Check for maximum number of clients (0 = no limit)
+  if (m_maxClients && (m_websocketSessionMap.size() > m_maxClients)) {
+    spdlog::error("[Websockets] New session: Maximum number of clients reached.");
+    return NULL;
+  }
+
   // Create fresh session
   pSession = new CWebSockSession;
   if (NULL == pSession) {
@@ -1774,6 +1860,7 @@ CWebSockSrv::ws1_readyHandler(struct mg_connection *conn, void *cbdata)
   pSession->setLastActiveTime(time(NULL));
 
   // Start authentication
+  spdlog::debug("[Websocket ws1] Sending AUTH0 to client. +;AUTH0;{0}", pSession->getSid());
   std::string str = vscp_str_format(("+;AUTH0;%s"), pSession->getSid());
   mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
 
@@ -1836,6 +1923,8 @@ CWebSockSrv::ws1_dataHandler(struct mg_connection *conn, struct mg_ws_message *w
         pSession->addConcatenatedString(wm->data);
         return VSCP_ERROR_SUCCESS;
       }
+
+      spdlog::debug("Websocket WS1 - Full message received: {}", strWsPkt.c_str());
 
       if (!ws1_message(conn, strWsPkt)) {
         return VSCP_ERROR_ERROR;
@@ -1916,7 +2005,7 @@ CWebSockSrv::ws1_message(struct mg_connection *conn, std::string &strWsPkt)
     case 'E': {
 
       // Must be authorised to do this
-      if (pSession->isAuthenticated()) {
+      if (!pSession->isAuthenticated()) {
 
         str = vscp_str_format(("-;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORISED, WEBSOCK_STR_ERROR_NOT_AUTHORISED);
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
@@ -2040,7 +2129,7 @@ CWebSockSrv::ws1_message(struct mg_connection *conn, std::string &strWsPkt)
         ex.obid = conn->id; // Set the obid
         if (VSCP_ERROR_SUCCESS == addEvent2ReceiveQueue(ex)) {
           mg_ws_send(conn, (const char *) "+;EVENT", 7, WEBSOCKET_OP_TEXT);
-          spdlog::error("[websocket ws1] Sent ws1 event {0}", strWsPkt.c_str());
+          spdlog::debug("[websocket ws1] Received ws1 event {0} from client {1}", strWsPkt.c_str(), pSession->getConnection()->id);
         }
         else {
           str = vscp_str_format(("-;%d;%s"), (int) WEBSOCK_ERROR_TX_BUFFER_FULL, WEBSOCK_STR_ERROR_TX_BUFFER_FULL);
@@ -2122,6 +2211,8 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
     mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
     return VSCP_ERROR_SUCCESS; // We still leave channel open
   }
+
+  spdlog::debug("[Websocket ws1] Command token = {0}", strTok.c_str());
 
   // ------------------------------------------------------------------------
   //                                NOOP
@@ -2836,8 +2927,11 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
                   return true; // 'true' leave connection open
                 }
 
-                ex.obid      = conn->id;             // Set the obid
-                ex.timestamp = vscp_makeTimeStamp(); // Set timestamp
+                ex.obid = conn->id; // Set the obid
+
+                if (0 == ex.timestamp) {               // If no timestamp is set
+                  ex.timestamp = vscp_makeTimeStamp(); // Set timestamp
+                }
 
                 // Put event on input queue of client
                 if (VSCP_ERROR_SUCCESS == addEvent2ReceiveQueue(ex)) {
@@ -3646,7 +3740,7 @@ websocksrv_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
   struct mg_tls_opts *tls_opts = NULL;
 
   if ((mgev == MG_EV_OPEN) && (conn->is_listening == 1)) {
-    conn->is_hexdumping = 1;
+    // conn->is_hexdumping = 1;
     spdlog::debug("WebSockSrv is listening.");
   }
   else if (conn->is_tls && (mgev == MG_EV_ACCEPT)) {
@@ -3679,7 +3773,9 @@ websocksrv_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
       strncpy(pws_key, header->buf, std::min(header->len + 1, sizeof(pws_key)));
     }
 
-    if (mg_match(hm->uri, mg_str("/ws1"), NULL)) {
+    // "/ws1"
+    if (pWebSockSrv->isEnableWS1() && mg_match(hm->uri, mg_str(pWebSockSrv->getWs1Url().c_str()), NULL)) {
+
       // Upgrade to websocket (ws1 protocol). From now on, a connection is a full-duplex
       // Websocket connection, which will receive MG_EV_WS_MSG events.
       mg_ws_upgrade(conn, hm, NULL);
@@ -3701,7 +3797,8 @@ websocksrv_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
       // Send AUTH start message
       pWebSockSrv->ws1_readyHandler(conn, pSession);
     }
-    else if (mg_match(hm->uri, mg_str("/ws2"), NULL)) {
+    // "/ws2"
+    else if (pWebSockSrv->isEnableWS2() && mg_match(hm->uri, mg_str(pWebSockSrv->getWs2Url().c_str()), NULL)) {
       // Upgrade to websocket (ws2 protocol). From now on, a connection is a full-duplex
       // Websocket connection, which will receive MG_EV_WS_MSG events.
       mg_ws_upgrade(conn, hm, NULL);
@@ -3723,14 +3820,18 @@ websocksrv_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
       // Send AUTH start message
       pWebSockSrv->ws2_readyHandler(conn, pSession);
     }
-    else if (mg_match(hm->uri, mg_str("/rest"), NULL)) {
+    // "/rest"
+    else if (pWebSockSrv->isEnableREST() && mg_match(hm->uri, mg_str(pWebSockSrv->getRestUrl().c_str()), NULL)) {
       // Serve REST response
       mg_http_reply(conn, 200, "", "{\"result\": %d}\n", 123);
     }
-    else {
+    else if (pWebSockSrv->isEnableStatic()) {
       // Serve static files
-      // struct mg_http_serve_opts opts = { .root_dir = getWebRoot().c_str() };
-      // mg_http_serve_dir(conn, hm, &opts);
+      spdlog::debug("Serving static file request for {0} from web root {1}",
+                    std::string(hm->uri.buf, hm->uri.len).c_str(),
+                    pWebSockSrv->getWebRoot().c_str());
+      struct mg_http_serve_opts opts = { .root_dir = pWebSockSrv->getWebRoot().c_str() };
+      mg_http_serve_dir(conn, hm, &opts);
     }
   }
   else if (MG_EV_WS_MSG == mgev) {
@@ -3786,12 +3887,14 @@ websocksrv_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
     // Traverse over all connections
     for (struct mg_connection *wc = conn->mgr->conns; wc != NULL; wc = wc->next) {
 
-      if (conn->id == pev->obid) {
-        continue; // Don't send to ourself
-      }
       if (wc->is_websocket == 0) {
         continue; // Not a websocket connection
       }
+
+      if (conn->id == pev->obid) {
+        continue; // Don't send to ourself
+      }
+
       CWebSockSession *pSession = pWebSockSrv->getSession(wc->id);
       if (NULL == pSession) {
         continue; // Not our connection
@@ -3833,76 +3936,7 @@ websocksrv_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
 
     spdlog::info("Client removed and connection closed");
   }
-  // else {
-  //   spdlog::error("Unhandled event {0}", mgev);
-  // }
 }
-
-static const char *s_listen_on = "ws://localhost:8000";
-static const char *s_web_root  = ".";
-static const char *s_ca_path   = "ca.pem";
-static const char *s_cert_path = "cert.pem";
-static const char *s_key_path  = "key.pem";
-
-// This RESTful server implements the following endpoints:
-//   /websocket - upgrade to Websocket, and implement websocket echo server
-//   /rest - respond with JSON string {"result": 123}
-//   any other URI serves static files from s_web_root
-// static void
-// fn(struct mg_connection *c, int ev, void *ev_data)
-// {
-
-//   CWebSockSrv *pWebSockSrv = (CWebSockSrv *) c->fn_data;
-//   if (NULL == pWebSockSrv) {
-//     spdlog::error("websocksrv_event_handler: Invalid CWebSockSrv pointer.");
-//     return;
-//   }
-
-//   if (ev == MG_EV_OPEN) {
-//     c->is_hexdumping = 1;
-//   }
-//   else if (c->is_tls && ev == MG_EV_ACCEPT) {
-//     struct mg_str ca        = mg_file_read(&mg_fs_posix, s_ca_path);
-//     struct mg_str cert      = mg_file_read(&mg_fs_posix, s_cert_path);
-//     struct mg_str key       = mg_file_read(&mg_fs_posix, s_key_path);
-//     struct mg_tls_opts opts = { .ca = ca, .cert = cert, .key = key };
-//     mg_tls_init(c, &opts);
-//   }
-//   else if (ev == MG_EV_HTTP_MSG) {
-//     struct mg_http_message *hm = (struct mg_http_message *) ev_data;
-//     if (mg_match(hm->uri, mg_str("/ws1"), NULL)) {
-//       // Upgrade to websocket. From now on, a connection is a full-duplex
-//       // Websocket connection, which will receive MG_EV_WS_MSG events.
-//       mg_ws_upgrade(c, hm, NULL);
-
-//       CWebSockSession *pSession = new CWebSockSession();
-//       if (NULL == pSession) {
-//         spdlog::error("websocksrv_event_handler: Failed to create CWebSockSession instance.");
-//         mg_http_reply(c, 500, "", "Internal Server Error\n");
-//         return;
-//       }
-//       // pSession->setWsType(WS_TYPE_2);
-//       // c->pfn_data = pSession; // Set session pointer in connection
-
-//       // Send AUTH start message
-//       pWebSockSrv->ws2_readyHandler(c, pSession);
-//     }
-//     else if (mg_match(hm->uri, mg_str("/rest"), NULL)) {
-//       // Serve REST response
-//       mg_http_reply(c, 200, "", "{\"result\": %d}\n", 123);
-//     }
-//     else {
-//       // Serve static files
-//       struct mg_http_serve_opts opts = { .root_dir = s_web_root };
-//       // mg_http_serve_dir(c, ev_data, &opts);
-//     }
-//   }
-//   else if (ev == MG_EV_WS_MSG) {
-//     // Got websocket frame. Received data is wm->data. Echo it back!
-//     struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
-//     mg_ws_send(c, wm->data.buf, wm->data.len, WEBSOCKET_OP_TEXT);
-//   }
-// }
 
 ///////////////////////////////////////////////////////////////////////////////
 // websockWorkerThread

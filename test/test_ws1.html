@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>VSCP WS1 Web Client</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    .row { margin: .5rem 0; }
+    #log { white-space: pre-wrap; background: #111; color: #ddd; padding: .75rem; border-radius: 6px; height: 300px; overflow: auto; }
+    input, button { padding: .4rem .6rem; }
+    code { background: #eee; padding: .1rem .25rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>VSCP WS1 Web Client</h1>
+
+  <div class="row">
+    <label>WS URL: <input id="url" size="40" value="ws://localhost:8884/ws1" /></label>
+    <button id="connect">Connect</button>
+    <button id="disconnect" disabled>Disconnect</button>
+  </div>
+
+  <div class="row">
+    <label>Username: <input id="user" value="admin" /></label>
+    <label>Password: <input id="pass" value="secret" type="password" /></label>
+  </div>
+
+  <div class="row">
+    <label>VSCP Key (hex 16 bytes): <input id="keyhex" size="40" value="2DBB079A38985AF00EBEEFE22F9FFA0E" /></label>
+  </div>
+
+  <div class="row">
+    <button id="noop" disabled>NOOP</button>
+    <button id="version" disabled>VERSION</button>
+    <button id="open" disabled>OPEN</button>
+    <button id="close" disabled>CLOSE</button>
+  </div>
+
+  <div class="row">
+    <label>Send raw command (without leading C;): <input id="raw" size="50" placeholder="VERSION" /></label>
+    <button id="sendRaw" disabled>Send</button>
+  </div>
+
+  <h3>Log</h3>
+  <div id="log"></div>
+
+  <script>
+    let ws = null;
+    let isOpen = false;
+    let authenticated = false;
+    let sessionId = null;
+
+    const $ = sel => document.querySelector(sel);
+    const log = (msg) => {
+      const el = $('#log');
+      el.textContent += msg + '\n';
+      el.scrollTop = el.scrollHeight;
+      console.log(msg);
+    };
+
+    function parseMessage(data) {
+      const text = typeof data === 'string' ? data : String(data);
+      const msg = text.trim();
+      const parts = msg.split(';');
+      return {
+        raw: msg,
+        type: parts[0] || '',
+        command: parts[1] || '',
+        params: parts.slice(2),
+      };
+    }
+
+    function encryptAuth(ivHex, keyHex, username, password) {
+      const key = CryptoJS.enc.Hex.parse(keyHex);
+      const iv  = CryptoJS.enc.Hex.parse(ivHex);
+      const creds = CryptoJS.enc.Utf8.parse(`${username}:${password}`);
+      // ZeroPadding to 16-byte boundary
+      const encrypted = CryptoJS.AES.encrypt(creds, key, {
+        iv,
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.ZeroPadding
+      });
+      return encrypted.ciphertext.toString(CryptoJS.enc.Hex).toUpperCase();
+    }
+
+    function send(message) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log('Cannot send, socket not open');
+        return;
+      }
+      log(`>> ${message}`);
+      ws.send(message);
+    }
+
+    function sendCommand(cmd, timeoutMs = 5000) {
+      return new Promise((resolve, reject) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not open'));
+          return;
+        }
+        const full = cmd.startsWith('C;') ? cmd : `C;${cmd}`;
+        const onMessage = (evt) => {
+          const msg = parseMessage(evt.data);
+          if (msg.type === '+' || msg.type === '-') {
+            ws.removeEventListener('message', onMessage);
+            clearTimeout(tid);
+            resolve(msg);
+          }
+        };
+        const tid = setTimeout(() => {
+          ws.removeEventListener('message', onMessage);
+          reject(new Error(`Timeout waiting response for: ${cmd}`));
+        }, timeoutMs);
+        ws.addEventListener('message', onMessage);
+        send(full);
+      });
+    }
+
+    function handleEventLine(eventLine) {
+      const fields = eventLine.split(',');
+      // E;head,class,type,obid,datetime,timestamp,guid,data...
+      log(`EVENT:
+  Head: ${fields[0]}
+  Class: ${fields[1]}
+  Type: ${fields[2]}
+  OBID: ${fields[3]}
+  DateTime: ${fields[4]}
+  Timestamp: ${fields[5]}
+  GUID: ${fields[6]}
+  Data: ${fields.slice(7).join(', ')}`);
+    }
+
+    function handleMessageText(text) {
+      const msg = parseMessage(text);
+      log(`<< ${msg.raw}`);
+
+      // Resolver-less flow: act on message types
+      if (msg.type === '+') {
+        if (msg.command === 'AUTH0') {
+          sessionId = msg.params[0];
+          const keyHex = $('#keyhex').value.trim();
+          const user = $('#user').value.trim();
+          const pass = $('#pass').value;
+          try {
+            const cipherHex = encryptAuth(sessionId, keyHex, user, pass);
+            send(`C;AUTH;${sessionId};${cipherHex}`);
+          } catch (e) {
+            log('Auth encryption error: ' + e.message);
+          }
+        } else if (msg.command === 'AUTH1') {
+          authenticated = true;
+          log('Authenticated.');
+          enableCommandButtons(true);
+        }
+      } else if (msg.type === '-') {
+        log(`ERROR: ${msg.command}; ${msg.params.join(';')}`);
+      } else if (msg.type === 'E') {
+        // whole event is in params[0]
+        if (msg.params.length > 0) handleEventLine(msg.params[0]);
+      }
+    }
+
+    function enableCommandButtons(on) {
+      $('#noop').disabled = !on;
+      $('#version').disabled = !on;
+      $('#open').disabled = !on;
+      $('#close').disabled = !on;
+      $('#sendRaw').disabled = !on;
+    }
+
+    function connect() {
+      const url = $('#url').value.trim();
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        log('Already connected/connecting.');
+        return;
+      }
+      log('Connecting to ' + url + ' ...');
+      ws = new WebSocket(url);
+      ws.binaryType = 'arraybuffer';
+
+      ws.addEventListener('open', () => {
+        isOpen = true;
+        authenticated = false;
+        sessionId = null;
+        log('Connected.');
+        $('#disconnect').disabled = false;
+        $('#connect').disabled = true;
+      });
+
+      ws.addEventListener('message', (evt) => {
+        if (typeof evt.data === 'string') {
+          handleMessageText(evt.data);
+        } else if (evt.data instanceof ArrayBuffer) {
+          const text = new TextDecoder().decode(new Uint8Array(evt.data));
+          handleMessageText(text);
+        } else {
+          log('Received unknown data type.');
+        }
+      });
+
+      ws.addEventListener('error', (e) => {
+        log('WebSocket error: ' + (e.message || e.type || 'unknown'));
+      });
+
+      ws.addEventListener('close', (e) => {
+        log(`Closed (${e.code}) ${e.reason || ''}`);
+        isOpen = false;
+        enableCommandButtons(false);
+        $('#disconnect').disabled = true;
+        $('#connect').disabled = false;
+      });
+    }
+
+    function disconnect() {
+      if (ws) ws.close();
+    }
+
+    // UI bindings
+    $('#connect').addEventListener('click', connect);
+    $('#disconnect').addEventListener('click', disconnect);
+
+    $('#noop').addEventListener('click', async () => {
+      try { log('NOOP → ' + JSON.stringify(await sendCommand('NOOP'))); }
+      catch (e) { log('NOOP error: ' + e.message); }
+    });
+
+    $('#version').addEventListener('click', async () => {
+      try { log('VERSION → ' + JSON.stringify(await sendCommand('VERSION'))); }
+      catch (e) { log('VERSION error: ' + e.message); }
+    });
+
+    $('#open').addEventListener('click', async () => {
+      try { log('OPEN → ' + JSON.stringify(await sendCommand('OPEN'))); }
+      catch (e) { log('OPEN error: ' + e.message); }
+    });
+
+    $('#close').addEventListener('click', async () => {
+      try { log('CLOSE → ' + JSON.stringify(await sendCommand('CLOSE'))); }
+      catch (e) { log('CLOSE error: ' + e.message); }
+    });
+
+    $('#sendRaw').addEventListener('click', async () => {
+      const cmd = $('#raw').value.trim();
+      if (!cmd) return;
+      try { log(`${cmd} → ` + JSON.stringify(await sendCommand(cmd))); }
+      catch (e) { log('Cmd error: ' + e.message); }
+    });
+
+    // Disable buttons initially
+    enableCommandButtons(false);
+  </script>
+</body>
+</html>

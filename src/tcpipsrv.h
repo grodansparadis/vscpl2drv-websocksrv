@@ -263,9 +263,6 @@ class CTcpipSrv
     */
     bool m_bReceiveOwnEvents;
 
-    /// Response timeout
-    uint32_t m_responseTimeout;
-
     /// Filters for input/output
     vscpEventFilter m_filterIn;
     vscpEventFilter m_filterOut;

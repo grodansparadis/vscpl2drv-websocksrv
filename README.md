@@ -866,5 +866,5 @@ It is very easy to interface VSCP Level II drivers from other software. Full inf
  * The VSCP document site - https://docs.vscp.org/
  * VSCP discussions - https://github.com/grodansparadis/vscp/discussions
  * https://www.baeldung.com/linux/shell-read-websocket-response
- * Test with `wscat -c ws://localhost:8000/ws1` or `wscat -c ws://localhost:8000/ws2`
+ * Test with `wscat -c ws://localhost:8884/ws1` or `wscat -c ws://localhost:8884/ws2`
  * AES on-line encryption/decryption - https://emn178.github.io/online-tools/aes/encrypt/

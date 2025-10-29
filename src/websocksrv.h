@@ -63,8 +63,8 @@
 // https://github.com/nlohmann/json
 using json = nlohmann::json;
 
-const uint16_t MAX_ITEMS_IN_QUEUE                          = 32000;
-const uint32_t WEBSOCKETSRV_DEFAULT_INNER_RESPONSE_TIMEOUT = 5000;
+// Maximum number of events in a client queue
+const uint16_t MAX_ITEMS_IN_QUEUE = 32000;
 
 #define DRIVER_COPYRIGHT "Copyright © 2000-2025 Ake Hedman, the VSCP Project, https://www.vscp.org"
 
@@ -78,8 +78,6 @@ using json = nlohmann::json;
 // websocket types
 #define WEBSOCKET_SUBYPE_STANDARD "vscp-std"  // Original format (ws1)
 #define WEBSOCKET_SUBTYPE_JSON    "vscp-json" // JSON format (ws2)
-
-#define MAX_VSCPWS_MESSAGE_QUEUE (512)
 
 // This is the time it takes for an expired websocket session to be
 // removed by the system.
@@ -269,8 +267,6 @@ public:
   bool isAuthenticated(void) { return m_bAuthenticated; };
   void setAuthenticated(bool bAuthenticated) { m_bAuthenticated = bAuthenticated; };
 
-  
-
 public:
   // Input Queue (events directed to this client)
   std::deque<vscpEvent *> m_inputQueue;
@@ -280,6 +276,8 @@ public:
 
   // Mutex handle that is used for sharing of the client object
   pthread_mutex_t m_mutexInputQueue;
+
+  uint16_t m_maxInputQueue; // Max size of input queue per client
 
 private:
   // ws type (0 = not set, 1 = ws1, 2 = ws2)
@@ -473,6 +471,34 @@ public:
   // Getters/setters for URL, web root, CA path, cert path and key path
   std::string getUrl(void) const { return m_url; }
   void setUrl(const std::string &url) { m_url = url; }
+
+  // get ws1 URL
+  std::string getWs1Url(void) const { return m_url_ws1; }
+  void setWs1Url(const std::string &url) { m_url_ws1 = url; }
+
+  // is ws1 enabled
+  bool isEnableWS1(void) const { return m_bEnableWS1; }
+  void setEnableWS1(bool bEnable) { m_bEnableWS1 = bEnable; }
+
+  // get ws2 URL
+  std::string getWs2Url(void) const { return m_url_ws2; }
+  void setWs2Url(const std::string &url) { m_url_ws2 = url; }
+
+  // is ws2 enabled
+  bool isEnableWS2(void) const { return m_bEnableWS2; }
+  void setEnableWS2(bool bEnable) { m_bEnableWS2 = bEnable; }
+
+  // get rest URL
+  std::string getRestUrl(void) const { return m_url_rest; }
+  void setRestUrl(const std::string &url) { m_url_rest = url; }
+
+  // is rest enabled
+  bool isEnableREST(void) const { return m_bEnableREST; }
+  void setEnableREST(bool bEnable) { m_bEnableREST = bEnable; }
+
+  // is static web pages enabled
+  bool isEnableStatic(void) const { return m_bEnableStatic; }
+  void setEnableStatic(bool bEnable) { m_bEnableStatic = bEnable; }
 
   std::string getWebRoot(void) const { return m_web_root; }
   void setWebRoot(const std::string &web_root) { m_web_root = web_root; }
@@ -768,22 +794,20 @@ public:
   /// Path to user data base (must be present)
   std::string m_pathUsers;
 
-  uint16_t m_maxClients; // Max clients
-  bool m_bEnableWS1;     // True to enable ws1
-  bool m_bEnableWS2;     // True to enable ws2
-  bool m_bEnableREST;    // True to enable REST
-  bool m_bEnableStatic;  // True to enable static web pages
+  uint16_t m_maxClients; // Max clients (0 = no limit)
 
-  /// Response timeout
-  uint32_t m_responseTimeout;
+  bool m_bEnableWS1;    // True to enable ws1
+  bool m_bEnableWS2;    // True to enable ws2
+  bool m_bEnableREST;   // True to enable REST
+  bool m_bEnableStatic; // True to enable static web pages
 
-  /// Filters for input/output
+  /// Filters events we are not interested in
   vscpEventFilter m_rxfilter;
-  vscpEventFilter m_txfilter;
 
   /// TLS / SSL
-  std::string m_tls_certificate_path;
-  std::string m_tls_private_key_path;
+  std::string m_tls_ca_path;          // Path to certificate authority file
+  std::string m_tls_certificate_path; // Path to TLS certificate file
+  std::string m_tls_private_key_path; // Path to TLS private key file
 
   /////////////////////////////////////////////////////////
   //                      Logging
@@ -828,13 +852,21 @@ public:
   // ------------------------------------------------------------------------
 
 private:
-
-  bool m_bDebug;  // Debug flag (gives extra debug output)
+  bool m_bDebug; // Debug flag (gives extra debug output)
 
   uint16_t m_maxClientQueueSize; // Max size of client queues
 
   // URL for the websocket server  ws: or wss:
   std::string m_url;
+
+  // Web root for the ws1 interface
+  std::string m_url_ws1;
+
+  // Web root for the ws2 interface
+  std::string m_url_ws2;
+
+  // Web root for the rest interface
+  std::string m_url_rest;
 
   // Web root for the websocket server
   std::string m_web_root;
