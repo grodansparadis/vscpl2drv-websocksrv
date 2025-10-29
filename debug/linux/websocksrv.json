@@ -21,14 +21,13 @@
     "key" : "/etc/vscp/certs/key.pem"
   },
   "logging" : {
+    "log-level" : "debug",
     "file-enable-log": true,
-    "file-log-level" : "debug",
     "file-pattern" : "[file vcpl2drv-websocksrv %c] [%^%l%$] %v",
     "file-path" : "/tmp/vscpl2drv-websocksrv.log",
     "file-max-size" : 5242880,
     "file-max-files" : 7,
     "console-enable-log": true,
-    "console-log-level" : "debug",
     "console-pattern" : "[console vcpl2drv-websocksrv %c] [%^%l%$] %v"
   }
 }
