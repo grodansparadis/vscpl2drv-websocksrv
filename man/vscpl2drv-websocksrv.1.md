@@ -1,18 +1,22 @@
 % vscpl2drv-tcpipsrv(1) VSCP Level II tcp/ip server Driver
 % Åke Hedmann, the VSCP Project
-% April 07, 2021
+% October 30, 2025
 
 # NAME
 
-vscpl2drv-tcpipsrv - VSCP Level II tcp/ip server driver
+vscpl2drv-websocksrv - VSCP Level II websocket server driver
 
 # SYNOPSIS
 
-vscpl2drv-tcpipsrv
+vscpl2drv-websocksrv
 
 # DESCRIPTION
 
-This driver interface SocketCAN, the official CAN API of the Linux kernel, has been included in the kernel for a long time now. Meanwhile, the official Linux repository has device drivers for all major CAN chipsets used in various architectures and bus types. SocketCAN offers the user a multiuser capable as well as hardware independent socket-based API for CAN based communication and configuration. Socketcan nowadays give access to the major CAN adapters that is available on the market. Note that as CAN only can handle Level I events only events up to class < 1024 can be sent to this device. Other events will be filtered out.
+The websocket driver is a level II driver and act as a websocket server for the [VSCP ws1 and ws2 websocket protocols](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket). Users or IoT/m2m devices with different privileges and rights can connect to the exported interface and send/receive VSCP events. Typically this is a web based HMI or IoT/m2m device that uses the VSCP protocol to communicate. This makes it very easy to display data from the VSCP network in a web browser widget or graphical control panel.
+
+The VSCP ws1 and ws2 websocket protocols are described [here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket).
+
+With the simple interface the VSCP level II driver uses ([described here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_driver_interfaces)) it is also possible to use it with other software as a component. 
 
 ## Configuration
 

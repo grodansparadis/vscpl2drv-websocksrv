@@ -81,7 +81,23 @@
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
-#define XML_BUFF_SIZE 0xffff
+/*!
+  Define the version for the ws1 protocol supported
+  by this driver
+*/
+#define VSCP_WS1_PROTOCOL_VERSION         1
+#define VSCP_WS1_PROTOCOL_MINOR_VERSION   0
+#define VSCP_WS1_PROTOCOL_RELEASE_VERSION 0
+#define VSCP_WS1_PROTOCOL_BUILD_VERSION   0
+
+/*!
+  Define the version for the ws1 protocol supported
+  by this driver
+*/
+#define VSCP_WS2_PROTOCOL_VERSION         1
+#define VSCP_WS2_PROTOCOL_MINOR_VERSION   0
+#define VSCP_WS2_PROTOCOL_RELEASE_VERSION 0
+#define VSCP_WS2_PROTOCOL_BUILD_VERSION   0
 
 // Websocket flags
 #define WEBSOCKET_OP_FINAL 0x80
@@ -269,7 +285,7 @@ CWebSockSrv::CWebSockSrv(void)
   console_start->set_pattern("[vscpl2drv-websocksrv: %c] [%^%l%$] %v");
 
   // Setting up logging defaults
-  m_logLevel     = spdlog::level::debug;
+  m_logLevel = spdlog::level::debug;
 
   m_bConsoleLogEnable = true;
   m_consoleLogPattern = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
@@ -834,8 +850,6 @@ CWebSockSrv::doLoadConfig(std::string &path)
                     "Defaults will be used.");
     }
 
-    
-
     // Logging: file-pattern
     if (j.contains("file-pattern")) {
       try {
@@ -1221,16 +1235,6 @@ CWebSockSrv::sendEventToClient(CWebSockSession *pSessionItem, const vscpEvent *p
     }
     return VSCP_ERROR_NOT_SUPPORTED;
   }
-
-  // Create a new event
-  // vscpEvent *pnewev = new vscpEvent;
-  // if (NULL != pnewev) {
-
-  //   // Copy in the new event
-  //   if (!vscp_copyEvent(pnewev, pEvent)) {
-  //     vscp_deleteEvent_v2(&pnewev);
-  //     return VSCP_ERROR_MEMORY;
-  //   }
 
   spdlog::debug("Sending event to client {}", pSessionItem->getConnection()->id);
 
@@ -2437,10 +2441,10 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
     strResult += VSCPL2DRV_WEBSOCKSRV_DISPLAY_VERSION;
     strResult += (";");
     strResult += vscp_str_format(("%d.%d.%d.%d"),
-                                 VSCPL2DRV_WEBSOCKSRV_VERSION,
-                                 VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION,
-                                 VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION,
-                                 VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION);
+                                 VSCP_WS1_PROTOCOL_VERSION,
+                                 VSCP_WS1_PROTOCOL_MINOR_VERSION,
+                                 VSCP_WS1_PROTOCOL_RELEASE_VERSION,
+                                 VSCP_WS1_PROTOCOL_BUILD_VERSION);
     // Positive reply
     mg_ws_send(conn, (const char *) strResult.c_str(), strResult.length(), WEBSOCKET_OP_TEXT);
   }
@@ -3279,10 +3283,10 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
     // std::string strvalue;
     std::string strResult;
     strResult = vscp_str_format("{ \"version\" : \"%d.%d.%d-%d\" }",
-                                VSCPL2DRV_WEBSOCKSRV_VERSION,
-                                VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION,
-                                VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION,
-                                VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION);
+                                VSCP_WS2_PROTOCOL_VERSION,
+                                VSCP_WS2_PROTOCOL_MINOR_VERSION,
+                                VSCP_WS2_PROTOCOL_RELEASE_VERSION,
+                                VSCP_WS2_PROTOCOL_BUILD_VERSION);
     // Positive reply
     std::string str = vscp_str_format(WS2_POSITIVE_RESPONSE, strCmd.c_str(), strResult.c_str());
     mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);

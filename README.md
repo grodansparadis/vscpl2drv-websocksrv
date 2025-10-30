@@ -9,11 +9,11 @@
 
 ---
 
-The websocket driver act as a websocket server for the [VSCP ws1 and ws2 websocket protocols](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket). Users or IoT/m2m devices with different privileges and rights can connect to the exported interface and send/receive VSCP events.
+The websocket driver is a level II driver and act as a websocket server for the [VSCP ws1 and ws2 websocket protocols](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket). Users or IoT/m2m devices with different privileges and rights can connect to the exported interface and send/receive VSCP events. Typically this is a web based HMI or IoT/m2m device that uses the VSCP protocol to communicate. This makes it very easy to display data from the VSCP network in a web browser widget or graphical control panel.
 
-The VSCP ws1 and ws2 websocket protocols are described [here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocketk).
+The VSCP ws1 and ws2 websocket protocols are described [here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket).
 
-With the simple interface the VSCP level II driver uses ([described here](https://grodansparadis.github.io/vscp/#/level_ii_drivers)) it is also possible to use it with other software as a component.
+With the simple interface the VSCP level II driver uses ([described here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_driver_interfaces)) it is also possible to use it with other software as a component.
 
 ## Install the driver on Linux
 You can install the driver using the debian package with
@@ -22,7 +22,11 @@ You can install the driver using the debian package with
 
 the driver will be installed to /var/lib/vscp/drivers/level2
 
-After installing the driver you need to add it to the vscpd.conf file (/etc/vscp/vscpd.conf). Se the *configuration* section below for how to do this.
+If you want to use the driver with the [VSCP Daemon](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_daemon) you need to add it to the vscpd.json file (/etc/vscp/vscpd.json). Se [this document](https://grodansparadis.github.io/vscp/#/configuring_the_vscp_daemon) on how to do this.
+
+For [VSCP Works](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_works) you need to add the driver in the VSCP Works configuration dialog [Add connection](https://grodansparadis.github.io/vscp-works-qt/#/connections).
+
+For other applications check the documentation for that application on how to add VSCP level II drivers.
 
 You also need to set up a configuration file for the driver itself. If you don't need to dynamically edit the content of this file a good and safe location for it is in the */etc/vscp/* folder alongside the VSCP daemon configuration file.
 
@@ -41,7 +45,6 @@ tbd
 - sudo apt install cmake
 - sudo apt install libexpat-dev
 - sudo apt install libssl-dev
-- sudo apt install libcurl4-openssl-dev
 - sudo apt install rpm              (comment: only if you want to create install packages)
 - cd vscpl2drv-websocksrv
 - mkdir build
@@ -267,7 +270,7 @@ This is the path to the driver configuration file (see below). This file determi
 All level II drivers must have a unique GUID. There is many ways to obtain this GUID, Read more [here](https://grodansparadis.gitbooks.io/the-vscp-specification/vscp_globally_unique_identifiers.html). The tool [vscp_eth_to_guid](https://grodansparadis.github.io/vscp/#/configuring_the_vscp_daemon?id=think-before-guid) is a useful tool that is shipped with the VSCP daemon that will get you a unique GUID if you are working on a machine with an Ethernet interface.
 
 ##### mqtt
-See the [VSCP configuration documentation](https://grodansparadis.github.io/vscp/#/configuring_the_vscp_daemon?id=config-mqtt) for info about this section. It is common for all drivers.
+See the [VSCP configuration documentation](https://grodansparadis.github.io/vscp/#/configuring_the_vscp_daemon?id=config-mqtt) for info about this section. It is common for all drivers loaded by the VSCP daemon.
 
 
 ---
@@ -275,182 +278,177 @@ See the [VSCP configuration documentation](https://grodansparadis.github.io/vscp
 
 #### vscpl2drv-websocksrv driver config
 
-On start up the configuration is read from the path set in the driver configuration of the VSCP daemon, usually */etc/vscp/conf-file-name* and values are set from this location. If the **write** parameter is set to "true" the above location is a bad choice as the VSCP daemon will not be able to write to it. A better location is */var/lib/vscp/drivername/configure.xml* or some other writable location.
+On start up the configuration is read from the path set in the driver configuration of the VSCP daemon, usually */etc/vscp/conf-file-name* and values are set from this location. If the **write** parameter is set to "true" the above location is a bad choice as the host software will not be able to write to it. A better location is */var/lib/vscp/drivername/conf-file-name* or some other writable location.
 
 The configuration file have the following format
 
 ```json
 {
-  "debug" : true,
-  "write" : false,
-  "key-file" : "/etc/vscp/vscp.key",
-  "max-out-queue" : 32000,
-  "max-in-queue" : 32000,
-  "interface" : "9598",
-  "encryption" : "aes256",
-  "path-users" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/users.json",
-  "receive-sent-events" : true,
-  "tls" : {
-    "certificate" : "",
-    "certificate-chain" : "",
-    "verify-peer" : false,
-    "ca-path" : "",
-    "ca-file" : "",
-    "verify-depth" : 9,
-    "default-verify-paths" : true,
-    "cipher-list" : "DES-CBC3-SHA:AES128-SHA:AES128-GCM-SHA256",
-    "protocol-version" : 3,
-    "short-trust" : false
-  },
-  "logging" : {
-    "file-enable-log": true,
-    "file-log-level" : "debug",
-    "file-pattern" : "[vcpl2drv-websocksrv %c] [%^%l%$] %v",
-    "file-path" : "/tmp/vscpl2drv-websocksrv.log",
-    "file-max-size" : 5242880,
-    "file-max-files" : 7,
-    "console-enable-log": true,
-    "console-log-level" : "debug",
-    "console-pattern" : "[vcpl2drv-websocksrv %c] [%^%l%$] %v"
-  },
-  "filter" : {
-    "in-filter" : "incoming filter on string form",
-    "in-mask" : "incoming mask on string form",
-    "out-filter" : "outgoing filter on string form",
-    "out-mask" : "outgoing mask on string form"
-  } 
+    "debug" : true,
+    "write" : false,
+    "enable-ws1" : true,
+    "enable-ws2" : true,
+    "enable-rest" : true,
+    "enable-static" : false,
+    "url-ws1" : "/ws1",
+    "url-ws2" : "/ws2",
+    "url-rest" : "/rest",
+    "web-root" : "/tmp/www",
+    "key-file" : "/etc/vscp/vscp.key",
+    "interface" : "ws://localhost:8884",
+    "rx-filter" : "0,0,0,-,0,0,0,-",
+    "max-client-queue-size" : 32000,
+    
+    "path-users" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/users.json",
+    "tls" : {
+      "ca" : "/etc/vscp/certs/ca.pem",
+      "cert" : "/etc/vscp/certs/cert.pem",
+      "key" : "/etc/vscp/certs/key.pem"
+    },
+    "logging" : {
+      "log-level" : "debug",
+      "file-enable-log": true,
+      "file-pattern" : "[vcpl2drv-websocksrv %c] [%^%l%$] %v",
+      "file-path" : "/tmp/vscpl2drv-websocksrv.log",
+      "file-max-size" : 5242880,
+      "file-max-files" : 7,
+      "console-enable-log": true,
+      "console-pattern" : "[vcpl2drv-websocksrv %c] [%^%l%$] %v"
+    }
 }
 ```
 
-A default configuration file is written to [/usr/share/vscp/drivers/level2/vscpl2drv-websocksrv](/usr/share/vscp/drivers/level2/vscpl2drv-websocksrv) when the driver is installed.
+A default configuration file is written to [/usr/share/vscp/drivers/level2/vscpl2drv-websocksrv](/usr/share/vscp/drivers/level2/vscpl2drv-websocksrv) when the driver is installed. The repository contains a sample configuration file that can be used as a starting point [here](https://github.com/grodansparadis/vscpl2drv-websocksrv/blob/main/debug/conf_standard.json).
 
 ##### debug
-Set debug to _true_ to get debug information written to the log file. This can be a valuable help if things does not behave as expected.
+Set debug to _true_ to get extra debug information written to the log file. This can be a valuable help if things does not behave as expected. This is only for extra debug information. Normal error and info messages are always logged according to the logging settings.
 
-##### write
+##### write (currently not used)
 If write is true dynamic changes to the configuration file will be possible to save dynamically to disk. That is, settings you do at runtime can be saved and be persistent. The safest place for a configuration file is in the VSCP configuration folder */etc/vscp/* but for dynamic saves are not allowed if you don't run the VSCP daemon as root (which you should not). Next best place is to use the folder */var/lib/vscp/drivers/level2/configure.json*. 
 
 If you never intend to change driver parameters during runtime consider moving the configuration file to the VSCP daemon configuration folder is a good choice.
 
+##### enable-ws1
+Set to true to enable VSCP webSocket ws1 interface support.
+
+##### enable-ws2
+Set to true to enable VSCP webSocket ws2 interface support.
+
+##### enable-static
+Set to true to enable static web content serving. `web-root` holds the path to the folder with the static content.
+
+##### url-ws1
+The URL part of the VSCP webSocket ws1 interface. Default is `/ws1`
+
+##### url-ws2
+The URL part of the VSCP webSocket ws2 interface. Default is `/ws2`
+
+##### web-root
+Path to the folder with static web content to be served if `enable-static` is set to true.  
+
 ##### key-file
-Currently not used.
+Pointer to a file that holds the private key for the communication. This is used to authenticate the server to connecting clients. The file should hold a HEX string that is at least 16 bytes long. A good way to generate such a key is to use the command line tool _openssl_ like this
 
-###### response-timeout
-Response timeout in milliseconds. Connection will be restarted if this expires.
+```bash
+openssl rand -hex 16 > /etc/vscp/vscp.key
+``` 
 
-##### max-out-queue
-Maximum number of events in the send queue.
-
-##### max-in-queue
-Maximum number of events in the input queue.
+The file can be longer then 16 bytes so it is useful for stronger encryption. The extra bytes will be ignored here.
 
 ##### interface
-Set the interface to listen on. Default is: *tcp://localhost:9598*. The interface is either secure (TLS) or insecure. It is not possible to define interfaces that accept connections of both types.
+Set the interface to listen on. Default is: *ws://localhost:8884*. The interface is either secure using prefix `wss` (TLS) or insecure using prefix `ws`. It is not possible to define interfaces that accept connections of both types.
 
-if "tcp:// part is omitted the content is treated as it was present.
+if "ws:// part is omitted the content is treated as it was present.
 
-If port is omitted, default 9598 is used.
+If port is omitted, default 8884 is used.
 
-For TLS/SSL use prefix "stcp://"
-
-##### encryption
-Response and commands from/to the tcp/ip link server can be encrypted using AES-128, AES-192 or AES-256. Set here as
-
-"none|aes128|aes192|aes256"
-
-**Default**: is no encryption.
 
 ##### path-users
-The user database is separated from the configuration file for security reasons and should be stored in a folder that is only readable by the user of the host, usually the VSCP daemon.
+The user database is separated from the configuration file for security reasons and should be stored in a folder that is only readable by the user of the host software.
 
-The format for the user file is specified below.
+The format for the user file is specified [below](#user-file-format).
 
-##### receive-sent-events
-If set to true events sent by the driver will be received by the driver itself. This is useful for debugging and testing and may be used to verify that events are sent correctly. If set to false sent events are not received by the driver. However the **CHKDATA** command will still show sent events in it's count. This behavior may be changed ion the future.
+##### max-client-queue-size
+Maximum number of events in the client send queue. If the queue is full new events for the client are dropped.
+
+##### rx-filter
+Set a default filter/mask for incoming events. The format is `priority,vscpclass,vscptype,GUID;priority-mask,vscpclass-mask,vscptype-mask,GUID-mask` where each field in the filter part (before the ';') can be a specific value. Values in the mask tells which bits in the filter that should be checked. A bit set to zero means "ignore". All bits set to one means "the value must be the same as in the first part". As an example the filter/mask
+
+> 0,10,6,00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:01;0,255,255,00:00:00:00:00:00:00:00:00:00:00:00:00:FF
+
+means that all events with class 10 and type 6 and any GUID with last byte set to 1 will pass the filter.
+
+All values can be give in decimal or hexadecimal (preceded number with '0x'). GUID is always given in hexadecimal (without preceded '0x').
 
 ##### TLS/SSL
-Settings for TLS (Transport Layer Security), SSL.  Not used at the moment.
+Settings for TLS (Transport Layer Security), SSL.  
 
-As TLS/SSL is not supported yet (it will be) in this driver it is important to understand that if used in an open environment like the internet it is not secure. People listening on the traffic can see both data and username/password credentials. It is therefore important to use the driver in a controlled environment and as early as possible move the flow of events to a secure environment like MQTT with TLS activated. This is often not a problem in a local cable based environment but is definitely a problem using wireless transmission that lack encryption.
+It is important to understand that if used in an open environment like the internet it is not secure. People listening on the traffic can see both data and username/password credentials. It is therefore important to use the driver in a controlled environment and as early as possible move the flow of events to a secure environment with TLS activated. This is often not a problem in a local cable based environment but is definitely a problem using wireless transmission that lack encryption.
 
-A solution is to use a SSL wrapper like [this one](https://github.com/cesanta/ssl_wrapper). 
+###### Certificates overview
 
-##### ssl_certificate
-Path to SSL certificate file. This option is only required when at least one of the listening_ports is SSL The file must be in PEM format, and it must have both private key and certificate, see for example ssl_cert.pem. If this option is set, then the webserver serves SSL connections on the port set up to listen on.
+Transport Layer Security (TLS), and its predecessor, Secure Sockets Layer (SSL), are cryptographic protocols that provide communications security over a computer network.
 
-**Default**: /srv/vscp/certs/server.pem
+TLS provides two major benefits:
 
-##### ssl_certificate_chain
-T.B.D.
+**traffic encryption**, which makes it impossible to sniff and look inside the traffic, 
 
-##### ssl_verify_peer
-Enable client's certificate verification by the server.
+and
 
-**Default**: false
+**authentication**, which makes it possible to one side of the TLS connection to verify the identity of the other side.
 
-##### ssl_ca_path
-Name of a directory containing trusted CA certificates for peers. Each file in the directory must contain only a single CA certificate. The files must be named by the subject name’s hash and an extension of “.0”. If there is more than one certificate with the same subject name they should have extensions ".0", ".1", ".2" and so on respectively.
+Here we're talking about authentication. Authentication is implemented via certificates. A certificate has two parts - public and private. Talking in practical terms, three files are required to implement TLS authentication:
 
-##### ssl_ca_file"
-Path to a .pem file containing trusted certificates for peers. The file may contain more than one certificate.
+`TLS certificate`: This is a "public" part. For example, a TLS-enabled server sends it to the client during the TLS handshake
 
-##### ssl_verify_depth
-Sets maximum depth of certificate chain. If client's certificate chain is longer than the depth set here connection is refused.
+`TLS private key`: This is a "private" part
 
-**Default**: 9
+`TLS Certificate Authority (CA) file`: This is used for verification of the "public" certificate sent by the server.
 
-##### ssl_default_verify_paths
-Loads default trusted certificates locations set at openssl compile time.
+The private key must be kept secret. The certificate and the CA file can be shared freely.
 
-**Default**: true
+Normally you set the certificate and the private key on the server side. The CA file is used on the client side to verify the server certificate.
 
-##### ssl_cipher_list
-List of ciphers to present to the client. Entries should be separated by colons, commas or spaces.
 
-| Selection	| Description |
-| ========= | =========== |
-| ALL |	All available ciphers |
-| ALL:!eNULL | All ciphers excluding NULL ciphers |
-| AES128:!MD5 | AES 128 with digests other than MD5 |
 
-See [this entry in OpenSSL documentation](https://www.openssl.org/docs/manmaster/apps/ciphers.html) for full list of options and additional examples.
+TLS certificates can be obtained from services like [Let's Encrypt](https://letsencrypt.org/). The other possibility is self-signed certificates, which are mainly used for development. You have a guid here to create self-signed certificates using OpenSSL [here](https://www.baeldung.com/openssl-self-signed-cert).
 
-**Default**: "DES-CBC3-SHA:AES128-SHA:AES128-GCM-SHA256",
+Normally, when a client makes a connection to a TLS-enabled server, the server sends its certificate to the client and the client verifies it using its own CA (Certificate Authority) file. This way the client authenticates the server.
 
-##### ssl_protocol_version
-Sets the minimal accepted version of SSL/TLS protocol according to the table:
+In the most common situation, the client verifies the server, but the server does not verify the client. For example, browsers (clients) use a big CA file (or many CA files) to verify HTTPS servers.
 
-| Selected protocols | setting |
-| ------------------ | ------- |
-| SSL2+SSL3+TLS1.0+TLS1.1+TLS1.2 | 0 |
-| SSL3+TLS1.0+TLS1.1+TLS1.2 | 1 |
-| TLS1.0+TLS1.1+TLS1.2 | 2 |
-| TLS1.1+TLS1.2	| 3 |
-| TLS1.2 | 4 |
+Clients can also provide certificates during the TLS handshake, and the server can verify it using a CA file. When both client and server use certificates, and verify the other side using a CA file, it is called `two-way TLS`. In order to implement two-way TLS, now both client and server must have their own cert, key and ca specified.
 
-**Default**: 4.
+So for two-way TLS both sides must have three files - cert, key and ca.
 
-##### ssl_short_trust
-Enables the use of short lived certificates. This will allow for the certificates and keys specified in ssl_certificate, ssl_ca_file and ssl_ca_path to be exchanged and reloaded while the server is running.
+##### Server
+  * ca.pem - file with trusted CA certificates to verify client certificates
+  * server_cert.pem - server TLS certificate
+  * server_key.pem - server TLS private key
 
-In an automated environment it is advised to first write the new pem file to a different filename and then to rename it to the configured pem file name to increase performance while swapping the certificate.
+##### Client
+  * ca.pem - file with trusted CA certificates to verify server certificates
+  * client_cert.pem - client TLS certificate (only for two-way TLS)
+  * client_key.pem - client TLS private key (only for two-way TLS)  
 
-Disk IO performance can be improved when keeping the certificates and keys stored on a tmpfs (linux) on a system with very high throughput.
+##### ca
+Path to a file containing trusted CA certificates for peers. Each file  must contain a single CA certificate. The file must be in PEM format. If this option is set, then the webserver requests a certificate from clients that connect and verifies that the certificate is signed by one of the CAs in the file.
 
-**Default**: false
+##### cert
+Path to SSL certificate file. This option is only required when  the listening_ports is SSL The file must be in PEM format.
+
+
+##### key
+Path to SSL private key file. This option is only required when the listening_ports is SSL The file must be in PEM format. This is **NOT** the key file used to authenticate the server to clients. That key is set in the _key-file_ parameter above.
+
 
 ### Logging
 In this section is the log console and log file settings. Before the configuration file is read logging will be sent to the console. 
 
 Modes for logging can be set as of below. In debug/trace mode the debug flag above defines how much info is logged.
 
-#### Logging to console
-
-##### console-enable-log :id=config-general-logging-console-enable-log
-Enable logging to a console by setting to *true*.
-
-##### console-log-level :id=config-general-logging-console-log-level
-Log level for console log. Default is "info".
+#### log-level :id=config-general-logging-log-level
+Log level for log. Default is "info".
 
 | Level | Description |
 | ----- | ----------- |
@@ -460,6 +458,13 @@ Log level for console log. Default is "info".
 | "err" | Errors and above is logged |
 | "critical" | Only critical messages are logged |
 | "off" | No logging |
+
+#### Logging to console
+
+##### console-enable-log :id=config-general-logging-console-enable-log
+Enable logging to a console by setting to *true*.
+
+
 
 ##### console-pattern :id=config-general-logging-console-pattern
 
