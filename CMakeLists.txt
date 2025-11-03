@@ -187,7 +187,7 @@ find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
 
 # Expat C library
-  find_package(expat CONFIG REQUIRED)
+find_package(expat CONFIG REQUIRED)
 
 # Windows Libs
 if (WIN32)
