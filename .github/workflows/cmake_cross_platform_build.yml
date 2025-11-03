@@ -37,12 +37,27 @@ jobs:
         path: vscp
         ref: development
 
+    # Setup vcpkg for Windows
+    - name: Setup vcpkg (Windows)
+      if: runner.os == 'Windows'
+      uses: microsoft/setup-msbuild@v1.1
+
+    - name: Install vcpkg dependencies (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        git clone https://github.com/Microsoft/vcpkg.git
+        cd vcpkg
+        .\bootstrap-vcpkg.bat
+        .\vcpkg.exe install expat:x64-windows openssl:x64-windows
+        echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" >> $env:GITHUB_ENV
+        echo "CMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake" >> $env:GITHUB_ENV
+
     # Linux dependencies
     - name: Install Linux dependencies
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libexpat-dev libssl-dev pandoc
+        sudo apt-get install -y libexpat1-dev libssl-dev pandoc
 
     # macOS dependencies
     - name: Install macOS dependencies
@@ -51,14 +66,14 @@ jobs:
         brew update
         brew install openssl expat pandoc pkg-config
         echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
+        echo "EXPAT_ROOT_DIR=$(brew --prefix expat)" >> $GITHUB_ENV
         echo "PKG_CONFIG_PATH=$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix expat)/lib/pkgconfig" >> $GITHUB_ENV
 
-    # Windows dependencies
+    # Windows dependencies (non-vcpkg)
     - name: Setup Windows dependencies
       if: runner.os == 'Windows'
       run: |
         choco install pandoc
-        echo "VCPKG_DEFAULT_TRIPLET=${{ matrix.triplet }}" >> $env:GITHUB_ENV
 
     - name: Create Build Environment
       run: cmake -E make_directory ${{github.workspace}}/build
@@ -73,7 +88,6 @@ jobs:
           -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
           -DCMAKE_INSTALL_PREFIX=/usr \
           -DVSCP_PATH=vscp/ \
-          -DVCPKG_TARGET_TRIPLET="${{ matrix.triplet }}" \
           -G "${{ matrix.generator }}"
 
     # Configure CMake for macOS
@@ -86,9 +100,10 @@ jobs:
           -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
           -DCMAKE_INSTALL_PREFIX=/usr/local \
           -DVSCP_PATH=vscp/ \
-          -DVCPKG_TARGET_TRIPLET="${{ matrix.triplet }}" \
           -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" \
+          -DEXPAT_ROOT_DIR="$EXPAT_ROOT_DIR" \
           -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON \
+          -DPkgConfig_EXECUTABLE="$(brew --prefix)/bin/pkg-config" \
           -G "${{ matrix.generator }}"
 
     # Configure CMake for Windows
@@ -100,7 +115,8 @@ jobs:
         cmake %GITHUB_WORKSPACE% ^
           -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
           -DVSCP_PATH=vscp/ ^
-          -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} ^
+          -DCMAKE_TOOLCHAIN_FILE=%CMAKE_TOOLCHAIN_FILE% ^
+          -DVCPKG_TARGET_TRIPLET=x64-windows ^
           -G "${{ matrix.generator }}" ^
           -A x64
 
