@@ -64,15 +64,15 @@ jobs:
       if: runner.os == 'macOS'
       run: |
         brew update
-        brew install openssl pandoc pkg-config
+        brew install openssl expat pandoc pkg-config
         echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
-        echo "PKG_CONFIG_PATH=$(brew --prefix openssl)/lib/pkgconfig" >> $GITHUB_ENV
+        echo "PKG_CONFIG_PATH=$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix expat)/lib/pkgconfig" >> $GITHUB_ENV
 
     # Windows dependencies (non-vcpkg)
     - name: Setup Windows dependencies
       if: runner.os == 'Windows'
       run: |
-        choco install pandoc
+        choco install pandoc expat libssl-dev
 
     - name: Create Build Environment
       run: cmake -E make_directory ${{github.workspace}}/build
