@@ -52,12 +52,18 @@ jobs:
         echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" >> $env:GITHUB_ENV
         echo "CMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake" >> $env:GITHUB_ENV
 
+    # Windows dependencies (only pandoc via choco, expat/openssl via vcpkg)
+    - name: Setup Windows dependencies
+      if: runner.os == 'Windows'
+      run: |
+        choco install pandoc
+
     # Linux dependencies
     - name: Install Linux dependencies
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y  libexpat1-dev libssl-dev pandoc
+        sudo apt-get install -y libexpat1-dev libssl-dev pandoc
 
     # macOS dependencies
     - name: Install macOS dependencies
@@ -68,12 +74,6 @@ jobs:
         echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
         echo "EXPAT_ROOT_DIR=$(brew --prefix expat)" >> $GITHUB_ENV
         echo "PKG_CONFIG_PATH=$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix expat)/lib/pkgconfig" >> $GITHUB_ENV
-
-    # Windows dependencies (non-vcpkg)
-    - name: Setup Windows dependencies
-      if: runner.os == 'Windows'
-      run: |
-        choco install pandoc libssl-dev
 
     - name: Create Build Environment
       run: cmake -E make_directory ${{github.workspace}}/build
@@ -106,7 +106,7 @@ jobs:
           -DPkgConfig_EXECUTABLE="$(brew --prefix)/bin/pkg-config" \
           -G "${{ matrix.generator }}"
 
-    # Configure CMake for Windows
+    # Configure CMake for Windows (with vcpkg)
     - name: Configure CMake (Windows)
       if: runner.os == 'Windows'
       shell: cmd
@@ -119,6 +119,19 @@ jobs:
           -DVCPKG_TARGET_TRIPLET=x64-windows ^
           -G "${{ matrix.generator }}" ^
           -A x64
+
+    # Debug: Show CMake configuration for troubleshooting
+    - name: Debug CMake configuration
+      if: failure()
+      working-directory: ${{github.workspace}}/build
+      shell: bash
+      run: |
+        echo "=== CMake Cache ==="
+        cat CMakeCache.txt || echo "No CMakeCache.txt found"
+        echo "=== CMake Error Log ==="
+        cat CMakeFiles/CMakeError.log || echo "No CMakeError.log found"
+        echo "=== Environment Variables ==="
+        env | grep -E "(CMAKE|VCPKG|OPENSSL|EXPAT|PKG_CONFIG)" || echo "No relevant env vars"
 
     - name: Build
       working-directory: ${{github.workspace}}/build
