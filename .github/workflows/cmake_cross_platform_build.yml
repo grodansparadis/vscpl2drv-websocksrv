@@ -48,7 +48,7 @@ jobs:
         git clone https://github.com/Microsoft/vcpkg.git
         cd vcpkg
         .\bootstrap-vcpkg.bat
-        .\vcpkg.exe install  openssl:x64-windows
+        .\vcpkg.exe install expat:x64-windows openssl:x64-windows
         echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" >> $env:GITHUB_ENV
         echo "CMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake" >> $env:GITHUB_ENV
 
@@ -57,7 +57,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y  libssl-dev pandoc
+        sudo apt-get install -y  libexpat1-dev libssl-dev pandoc
 
     # macOS dependencies
     - name: Install macOS dependencies
@@ -66,13 +66,14 @@ jobs:
         brew update
         brew install openssl expat pandoc pkg-config
         echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
+        echo "EXPAT_ROOT_DIR=$(brew --prefix expat)" >> $GITHUB_ENV
         echo "PKG_CONFIG_PATH=$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix expat)/lib/pkgconfig" >> $GITHUB_ENV
 
     # Windows dependencies (non-vcpkg)
     - name: Setup Windows dependencies
       if: runner.os == 'Windows'
       run: |
-        choco install pandoc expat libssl-dev
+        choco install pandoc libssl-dev
 
     - name: Create Build Environment
       run: cmake -E make_directory ${{github.workspace}}/build
@@ -100,6 +101,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/usr/local \
           -DVSCP_PATH=vscp/ \
           -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" \
+          -DEXPAT_ROOT_DIR="$EXPAT_ROOT_DIR" \
           -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON \
           -DPkgConfig_EXECUTABLE="$(brew --prefix)/bin/pkg-config" \
           -G "${{ matrix.generator }}"
