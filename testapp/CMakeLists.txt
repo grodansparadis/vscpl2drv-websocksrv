@@ -80,6 +80,10 @@ target_sources(${PROJECT_NAME} PRIVATE main.cpp
   ../third_party/crypto-algorithms/sha256.c)
 
 if (WIN32)  
+  
+  find_package(pthreads REQUIRED)
+  find_path(PTHREAD_INCLUDE_DIR pthread.h)
+
   include_directories( PUBLIC src/
     ../third_party/vscp/src/vscp/common/  
     ../third_party/vscp/src/common/
