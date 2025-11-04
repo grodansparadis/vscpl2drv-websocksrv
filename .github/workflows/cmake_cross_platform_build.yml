@@ -124,6 +124,8 @@ jobs:
           -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
           -DCMAKE_TOOLCHAIN_FILE=%CMAKE_TOOLCHAIN_FILE% ^
           -DVCPKG_TARGET_TRIPLET=x64-windows ^
+          -DCMAKE_CXX_FLAGS="/utf-8" ^
+          -DCMAKE_C_FLAGS="/utf-8" ^
           -G "${{ matrix.generator }}" ^
           -A x64
 
