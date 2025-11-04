@@ -27,6 +27,9 @@
 
 #ifdef WIN32
 #include "StdAfx.h"
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
 #endif
 
 #include <string>
@@ -83,7 +86,6 @@ main(int argc, char *argv[])
   void *hdll;       // Handle to libvscpl2drv-websocksrv.so
   long openHandle;  // Driver handle
   vscpEvent evSend; // VSCP send event
-  vscpEvent *pev;   // VSCP event
 
   uint32_t counter = 0; // used for event data
 
@@ -176,10 +178,14 @@ main(int argc, char *argv[])
     vscpEvent ev;
     memset(&ev, 0, sizeof(vscpEvent));
 
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+    Sleep(1000);
+#else     
     sleep(1);
+#endif
 
     // Block until event is received
-    if (CANAL_ERROR_SUCCESS != proc_VSCPRead(openHandle, pev, 1000)) {
+    if (CANAL_ERROR_SUCCESS != proc_VSCPRead(openHandle, &ev, 1000)) {
       // Send event
       proc_VSCPWrite(openHandle, &evSend, 500);
       counter++;

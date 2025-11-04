@@ -33,15 +33,24 @@ include(GNUInstallDirs)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
+# Disable abi warnings (nlohmann)
+if(WIN32)
+  add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+  add_definitions(-D_WINSOCK_DEPRECATED_NO_WARNINGS)
+endif() 
+
 # pthreads
-set (THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
+#set (THREADS_PREFER_PTHREAD_FLAG ON)
+#find_package(Threads REQUIRED)
 
 #openssl
-find_package(OpenSSL REQUIRED)
+#find_package(OpenSSL REQUIRED)
 
 # Expat C library
 find_package(expat CONFIG REQUIRED)
+
+# dlfcn
+find_package(dlfcn-win32 CONFIG REQUIRED)
 
 add_executable(${PROJECT_NAME})
 target_sources(${PROJECT_NAME} PRIVATE main.cpp
@@ -79,6 +88,7 @@ if (WIN32)
     ${PThreads4W_INCLUDE_DIR}
     ${CMAKE_BINARY_DIR}
     ${OPENSSL_INCLUDE_DIR}
+    ${DLFCN_INCLUDES}
     ${LOCAL_WIN_INCLUDE})
 else()
   include_directories( PUBLIC src/
@@ -92,8 +102,9 @@ else()
 
  if (WIN32)
   target_link_libraries(${PROJECT_NAME} PRIVATE     
-    PThreads4W::PThreads4W_CXXEXC
+    #PThreads4W::PThreads4W_CXXEXC
     expat::expat
+    dlfcn-win32::dl
   )
         
 else()

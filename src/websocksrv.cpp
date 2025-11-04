@@ -32,11 +32,30 @@
 
 #define _POSIX
 
+#ifdef WIN32
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+// _WINSOCK_DEPRECATED_NO_WARNINGS is already defined by mongoose.h
+// #ifndef _WINSOCK_DEPRECATED_NO_WARNINGS
+// #define _WINSOCK_DEPRECATED_NO_WARNINGS
+// #endif
+#include "StdAfx.h"
+#include <pch.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#endif
+
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <sstream>
+#include <algorithm>
 
+#ifdef WIN32
+#include <windows.h>
+#else
 #include <arpa/inet.h>
 #include <errno.h>
 #include <linux/if_ether.h>
@@ -46,17 +65,23 @@
 #include <net/if_arp.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <pthread.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/msg.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
+
+#include <pthread.h>
+#ifndef WIN32
+#include <semaphore.h>
+#endif
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 
 #include <mongoose.h>
 #include <expat.h>
@@ -77,8 +102,10 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-#ifndef _CRT_SECURE_NO_WARNINGS
-#define _CRT_SECURE_NO_WARNINGS
+
+
+#ifdef WIN32
+// Windows socket initialization will be done in constructor
 #endif
 
 /*!
@@ -137,7 +164,11 @@ CWebSockSession::CWebSockSession(void)
   setAuthenticated(false); // Not authenticated in yet
 
   // Initialise semaphores
+#ifdef WIN32
+  m_semInputQueue = CreateSemaphore(NULL, 0, MAX_ITEMS_IN_QUEUE, NULL);
+#else
   sem_init(&m_semInputQueue, 0, 0);
+#endif
 
   // Initialise mutexes
   pthread_mutex_init(&m_mutexInputQueue, NULL);
@@ -156,7 +187,11 @@ CWebSockSession::~CWebSockSession(void)
   m_inputQueue.clear();
   pthread_mutex_unlock(&m_mutexInputQueue);
 
+#ifdef WIN32
+  CloseHandle(m_semInputQueue);
+#else
   sem_destroy(&m_semInputQueue);
+#endif
   pthread_mutex_destroy(&m_mutexInputQueue);
 };
 
@@ -186,7 +221,11 @@ CWebSockSession::addToInputQueue(const vscpEvent *pEvent)
   m_inputQueue.push_back(pEventCopy);
 
   // Post semaphore
+#ifdef WIN32
+  ReleaseSemaphore(m_semInputQueue, 1, NULL);
+#else
   sem_post(&m_semInputQueue);
+#endif
 
   // Unlock the input queue
   pthread_mutex_unlock(&m_mutexInputQueue);
@@ -230,7 +269,7 @@ CWebSockSession::generateSid(void)
 w2msg::w2msg(void)
 {
   m_type = MSG_TYPE_COMMAND;
-  memset(&m_ex, 0., sizeof(vscpEventEx));
+  memset(&m_ex, 0, sizeof(vscpEventEx));
 };
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -256,15 +295,33 @@ CWebSockSrv::CWebSockSrv(void)
 {
   m_bQuit = false;
 
+#ifdef WIN32
+  // Initialize Windows sockets
+  WSADATA wsaData;
+  int iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
+  if (iResult != 0) {
+    spdlog::error("WSAStartup failed: {0}", iResult);
+  }
+#endif
+
   vscp_clearVSCPFilter(&m_rxfilter); // Accept all events
 
+  #ifdef WIN32
+  m_websockWorkerThread = NULL;
+  #else
   m_websockWorkerThread = 0;
+  #endif
   m_bDebug              = false;
   m_maxClientQueueSize  = MAX_ITEMS_IN_QUEUE;
 
   // Initialise semaphores
+  #ifdef WIN32
+  m_semSendQueue = CreateSemaphore(NULL, 0, MAX_ITEMS_IN_QUEUE, NULL);
+  m_semReceiveQueue = CreateSemaphore(NULL, 0, MAX_ITEMS_IN_QUEUE, NULL);
+  #else
   sem_init(&m_semSendQueue, 0, 0);
   sem_init(&m_semReceiveQueue, 0, 0);
+  #endif
 
   // Initialise mutex
   pthread_mutex_init(&m_mutexSendQueue, NULL);
@@ -336,13 +393,23 @@ CWebSockSrv::~CWebSockSrv(void)
 {
   close();
 
+  #ifdef WIN32
+  CloseHandle(m_semSendQueue);
+  CloseHandle(m_semReceiveQueue);
+  #else
   sem_destroy(&m_semSendQueue);
   sem_destroy(&m_semReceiveQueue);
+  #endif
 
   pthread_mutex_destroy(&m_mutexSendQueue);
   pthread_mutex_destroy(&m_mutexReceiveQueue);
 
   pthread_mutex_destroy(&m_mutex_UserList);
+
+#ifdef WIN32
+  // Cleanup Windows sockets
+  WSACleanup();
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1069,10 +1136,18 @@ CWebSockSrv::start(void)
 
   m_bQuit = false;
 
+#ifdef WIN32
+  m_websockWorkerThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)websockWorkerThread, this, 0, NULL);
+  if (m_websockWorkerThread == NULL) {
+    spdlog::error("Controlobject: Unable to start the websocket worker thread.");
+    return VSCP_ERROR_ERROR;
+  }
+#else
   if (pthread_create(&m_websockWorkerThread, NULL, websockWorkerThread, this)) {
     spdlog::error("Controlobject: Unable to start the websocket worker thread.");
     return VSCP_ERROR_ERROR;
   }
+#endif
 
   return VSCP_ERROR_SUCCESS;
 }
@@ -1090,13 +1165,22 @@ CWebSockSrv::stop(void)
   spdlog::debug("Controlobject: Terminating WebSocket thread.");
 
   // Wait for thread to finish and clean up
+  #ifdef WIN32
+  if (m_websockWorkerThread == NULL) { // Check if thread was created
+    // Not started
+    return VSCP_ERROR_SUCCESS;
+  }
+  CloseHandle(m_websockWorkerThread);
+  m_websockWorkerThread = NULL; // Reset thread handle
+  #else
   if (!m_websockWorkerThread) { // Check if thread was created
     // Not started
     return VSCP_ERROR_SUCCESS;
   }
-
   pthread_join(m_websockWorkerThread, NULL);
   m_websockWorkerThread = 0; // Reset thread ID
+  #endif
+ 
 
   spdlog::debug("Controlobject: Terminated WebSocket thread.");
 
@@ -1137,7 +1221,11 @@ CWebSockSrv::addEvent2SendQueue(const vscpEvent *pEvent)
     return VSCP_ERROR_FIFO_FULL;
   }
   m_sendQueue.push_back((vscpEvent *) pEvent);
+#ifdef WIN32
+  ReleaseSemaphore(m_semSendQueue, 1, NULL);
+#else
   sem_post(&m_semSendQueue);
+#endif
   pthread_mutex_unlock(&m_mutexSendQueue);
   return VSCP_ERROR_SUCCESS;
 }
@@ -1154,7 +1242,11 @@ CWebSockSrv::addEvent2ReceiveQueue(const vscpEvent *pEvent)
   pthread_mutex_lock(&m_mutexReceiveQueue);
   m_receiveQueue.push_back((vscpEvent *) pEvent);
   pthread_mutex_unlock(&m_mutexReceiveQueue);
+#ifdef WIN32
+  ReleaseSemaphore(m_semReceiveQueue, 1, NULL);
+#else
   sem_post(&m_semReceiveQueue);
+#endif
   return VSCP_ERROR_SUCCESS;
 }
 
@@ -1181,7 +1273,11 @@ CWebSockSrv::addEvent2ReceiveQueue(vscpEventEx &ex)
     pthread_mutex_lock(&m_mutexReceiveQueue);
     m_receiveQueue.push_back(pev);
     pthread_mutex_unlock(&m_mutexReceiveQueue);
+#ifdef WIN32
+    ReleaseSemaphore(m_semReceiveQueue, 1, NULL);
+#else
     sem_post(&m_semReceiveQueue);
+#endif
   }
   else {
     vscp_deleteEvent(pev);
@@ -1496,7 +1592,7 @@ CWebSockSrv::postIncomingEvent(void)
 int
 CWebSockSrv::authentication(struct mg_connection *conn, std::string &strContent, std::string &strIV)
 {
-  uint8_t buf[2048], secret[2048];
+  uint8_t buf[2048]; //, secret[2048];
   uint8_t iv[16];
   std::string strUser, strPassword;
 
@@ -2260,7 +2356,7 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
       else {
         str = vscp_str_format(("-;AUTH;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORISED, WEBSOCK_STR_ERROR_NOT_AUTHORISED);
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-        generateSid();                     // Generate new sid
+        pSession->generateSid();                     // Generate new sid
         pSession->setAuthenticated(false); // not authenticated
       }
     }
@@ -3634,7 +3730,7 @@ CWebSockSrv::readEncryptionKey(const std::string &path)
 {
   // TODO Key is in session object
   try {
-    uint8_t key[33];
+    //uint8_t key[33];
     std::ifstream in(path, std::ifstream::in);
     std::stringstream strStream;
     strStream << in.rdbuf();
@@ -3724,13 +3820,15 @@ websocksrv_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
     char pws_version[10];
     memset(pws_version, 0, sizeof(pws_version));
     if (NULL != (header = mg_http_get_header(hm, "Sec-WebSocket-Version"))) {
-      strncpy(pws_version, header->buf, std::min(header->len + 1, sizeof(pws_version)));
+      size_t copyLen = (header->len < sizeof(pws_version) - 1) ? header->len : sizeof(pws_version) - 1;
+      strncpy(pws_version, header->buf, copyLen);
     }
 
     char pws_key[33];
     memset(pws_key, 0, sizeof(pws_key));
     if (NULL != (header = mg_http_get_header(hm, "Sec-WebSocket-Key"))) {
-      strncpy(pws_key, header->buf, std::min(header->len + 1, sizeof(pws_key)));
+      size_t copyLen = (header->len < sizeof(pws_key) - 1) ? header->len : sizeof(pws_key) - 1;
+      strncpy(pws_key, header->buf, copyLen);
     }
 
     // "/ws1"
@@ -3923,6 +4021,11 @@ websockWorkerThread(void *pData)
   while (!pWebSockSrv->m_bQuit) {
     mg_mgr_poll(&mgr, 100); // Poll for events
 
+    vscpEvent *pEvent = NULL;
+#ifdef WIN32
+    // Wait for semaphore with 100ms timeout
+    if (WaitForSingleObject(pWebSockSrv->m_semSendQueue, 100) == WAIT_OBJECT_0) {
+#else
     struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
       /* handle error */
@@ -3933,8 +4036,8 @@ websockWorkerThread(void *pData)
       ts.tv_sec++;
       ts.tv_nsec -= 1000000000;
     }
-    vscpEvent *pEvent = NULL;
     if (sem_timedwait(&pWebSockSrv->m_semSendQueue, &ts) == 0) {
+#endif
 
       // We have an event to send
       pthread_mutex_lock(&pWebSockSrv->m_mutexSendQueue);

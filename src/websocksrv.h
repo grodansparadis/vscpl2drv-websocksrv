@@ -272,7 +272,11 @@ public:
   std::deque<vscpEvent *> m_inputQueue;
 
   // Semaphore to signal that an event has been received
+#ifdef WIN32
+  HANDLE m_semInputQueue;
+#else
   sem_t m_semInputQueue;
+#endif
 
   // Mutex handle that is used for sharing of the client object
   pthread_mutex_t m_mutexInputQueue;
@@ -663,11 +667,6 @@ public:
   // bool generateSessionId(const char *pKey, char *pSid);
 
   /*!
-    @brief Generate a random session ID (SID)
-  */
-  void generateSid(void);
-
-  /*!
     Read encryption key
     @param path Path to file holding encryption key.
     @return True if read OK.
@@ -828,15 +827,27 @@ public:
   bool m_bQuit; // Flag to indicate if the server should quit
   cguid m_guid; // Driver GUID
 
+  #ifdef WIN32
+  HANDLE m_semReceiveQueue;               // Semaphore for receive queue
+  #else
   sem_t m_semReceiveQueue;               // Semaphore for receive queue
+  #endif
   pthread_mutex_t m_mutexReceiveQueue;   // Mutex for receive queue
   std::list<vscpEvent *> m_receiveQueue; // Receive queue
 
+  #ifdef WIN32
+  HANDLE m_semSendQueue;               // Semaphore for send queue
+  #else
   sem_t m_semSendQueue;               // Semaphore for send queue
+  #endif
   pthread_mutex_t m_mutexSendQueue;   // Mutex for send queue
   std::list<vscpEvent *> m_sendQueue; // Send queue
 
+#ifdef WIN32
+  HANDLE m_websockWorkerThread; // Worker thread for websocket server
+#else
   pthread_t m_websockWorkerThread; // Worker thread for websocket server
+#endif
 
   //**************************************************************************
   //                                USERS

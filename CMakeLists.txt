@@ -42,6 +42,8 @@ endif()
 
 # Disable abi warnings (nlohmann)
 if(WIN32)
+add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+add_definitions(-D_WINSOCK_DEPRECATED_NO_WARNINGS)
 add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
 add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
 else()
@@ -82,8 +84,8 @@ add_subdirectory(testapp)
 
 option(USE_SSL "Use SSL" TRUE)
 
-## --- C++11 build flags ---
-set(CMAKE_CXX_STANDARD 14)
+## --- C++20 build flags ---
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 
@@ -180,14 +182,14 @@ ENDIF(EXISTS "${CMAKE_ROOT}/Modules/CPack.cmake")
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 # pthreads
-set (THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
+#set (THREADS_PREFER_PTHREAD_FLAG ON)
+#find_package(Threads REQUIRED)
 
 #openssl
 find_package(OpenSSL REQUIRED)
 
 # Expat C library
-  find_package(expat CONFIG REQUIRED)
+find_package(expat CONFIG REQUIRED)
 
 # Windows Libs
 if (WIN32)
@@ -234,7 +236,7 @@ add_library(${PROJECT_NAME}
 
 if (WIN32)
     
-  find_package(pthreads REQUIRED)
+  find_package(PThreads4W REQUIRED)
   find_path(PTHREAD_INCLUDE_DIR pthread.h)
 
   include_directories( PUBLIC src/
