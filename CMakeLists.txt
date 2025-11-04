@@ -248,12 +248,11 @@ if (WIN32)
     ./third_party/json/single_include/
     ./third_party/Mustache/
     ./third_party/spdlog/include/
-    #${PThreads4W_INCLUDE_DIR}
     ${PTHREAD_INCLUDE_DIR}
     ${CMAKE_BINARY_DIR}
     ${OPENSSL_INCLUDE_DIR}
     ${LOCAL_WIN_INCLUDE}
-    ${LOCAL_SYSLOG_INCLUDE} )
+ )
 else()
   include_directories( PUBLIC src/
     ./third_party/vscp/src/vscp/common/
@@ -270,7 +269,6 @@ else()
 
 if (WIN32)
   target_link_libraries(${PROJECT_NAME} PRIVATE     
-#    PThreads4W::PThreads4W_CXXEXC
     ${THREAD_LIBRARIES}
     OpenSSL::SSL 
     OpenSSL::Crypto
@@ -282,7 +280,6 @@ else()
   target_link_libraries(${PROJECT_NAME} PRIVATE     
     m
     dl
-    #Threads::Threads
     ${THREAD_LIBRARIES}
     OpenSSL::SSL 
     OpenSSL::Crypto
