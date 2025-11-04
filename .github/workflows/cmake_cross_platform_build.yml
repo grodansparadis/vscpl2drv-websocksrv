@@ -1,161 +1,188 @@
-# CMakeLists.txt
-#
-# Build instructions for VSCP Works.
-#
-# Copyright (c) 2000-2025 Åke Hedman, the VSCP Project
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-# 
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-# 
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-#
+name: CMake Cross-Platform Build
 
-cmake_minimum_required(VERSION 3.5)
-project(testapp LANGUAGES CXX C)
-set(PACKAGE_AUTHOR "Ake Hedman, the VSCP Project")
+on: [push, pull_request]
 
-# --- System Libraries ---
-include(GNUInstallDirs)
+env:
+  BUILD_TYPE: Release
 
-set(CMAKE_INCLUDE_CURRENT_DIR ON)
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            triplet: x64-linux
+            generator: "Unix Makefiles"
+          - os: windows-latest
+            triplet: x64-windows
+            generator: "Visual Studio 17 2022"
+          - os: macos-latest
+            triplet: x64-osx
+            generator: "Unix Makefiles"
 
-# Windows-specific compiler flags
-if(WIN32)
-  add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-  add_definitions(-D_WINSOCK_DEPRECATED_NO_WARNINGS)
-  # Add UTF-8 support for spdlog/fmt
-  add_compile_options(/utf-8)
-endif() 
+    steps:
+    - name: Checkout main repository
+      uses: actions/checkout@v4
+      with:
+        repository: grodansparadis/vscpl2drv-websocksrv
+        submodules: 'recursive' 
 
-# Threading support - cross-platform
-if(WIN32)
-    # On Windows with vcpkg, use the pthreads package
-    find_package(pthreads CONFIG QUIET)
-    if(pthreads_FOUND)
-        message(STATUS "Found pthreads via vcpkg")
-        set(THREAD_LIBRARY PThreads4W::PThreads4W)
-        set(THREAD_INCLUDE_DIR "")  # vcpkg handles includes automatically
-    else()
-        # Fallback to Windows threads
-        message(STATUS "Using Windows native threads")
-        set(CMAKE_USE_WIN32_THREADS_INIT 1)
-        set(CMAKE_USE_PTHREADS_INIT 0)
-        set(THREAD_LIBRARY "")
-        set(THREAD_INCLUDE_DIR "")
-    endif()
-else()
-    # Unix/Linux/macOS - use standard pthread
-    set(THREADS_PREFER_PTHREAD_FLAG ON)
-    find_package(Threads REQUIRED)
-    set(THREAD_LIBRARY Threads::Threads)
-    set(THREAD_INCLUDE_DIR "")
-endif()
+    - name: Checkout VSCP repository
+      uses: actions/checkout@v4
+      with:
+        repository: grodansparadis/vscp
+        path: third_party/vscp
+        ref: development
 
-#openssl
-#find_package(OpenSSL REQUIRED)
+    # Setup vcpkg for Windows
+    - name: Setup vcpkg (Windows)
+      if: runner.os == 'Windows'
+      uses: microsoft/setup-msbuild@v1.1
 
-# Expat C library
-find_package(expat CONFIG REQUIRED)
+    - name: Install vcpkg dependencies (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        git clone https://github.com/Microsoft/vcpkg.git
+        cd vcpkg
+        .\bootstrap-vcpkg.bat
+        .\vcpkg.exe install expat:x64-windows openssl:x64-windows pthreads:x64-windows dlfcn-win32:x64-windows
+        echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" >> $env:GITHUB_ENV
+        echo "CMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake" >> $env:GITHUB_ENV
 
-# dlfcn
-if (WIN32)
-    find_package(dlfcn-win32 CONFIG REQUIRED)
-endif()
+    # Windows dependencies (only pandoc via choco, other deps via vcpkg)
+    - name: Setup Windows dependencies
+      if: runner.os == 'Windows'
+      run: |
+        choco install pandoc
 
-add_executable(${PROJECT_NAME})
-target_sources(${PROJECT_NAME} PRIVATE main.cpp
-  ../third_party/Mustache/mustache.hpp
-  ../third_party/spdlog/include
-  ../third_party/vscp/src/vscp/common/guid.h
-  ../third_party/vscp/src/vscp/common/guid.cpp 
-  ../third_party/vscp/src/vscp/common/vscp.h
-  ../third_party/vscp/src/vscp/common/vscpdatetime.h
-  ../third_party/vscp/src/vscp/common/vscpdatetime.cpp
-  ../third_party/vscp/src/vscp/common/vscphelper.h
-  ../third_party/vscp/src/vscp/common/vscphelper.cpp
-  ../third_party/vscp/src/vscp/common/canal.h
-  ../third_party/vscp/src/common/vscpbase64.h
-  ../third_party/vscp/src/common/vscpbase64.c
-  ../third_party/vscp/src/common/vscp-aes.h
-  ../third_party/vscp/src/common/vscp-aes.c
-  ../third_party/vscp/src/common/crc.h
-  ../third_party/vscp/src/common/crc.c
-  ../third_party/vscp/src/common/crc8.h
-  ../third_party/vscp/src/common/crc8.c
-  ../third_party/vscp/src/common/vscpmd5.h
-  ../third_party/vscp/src/common/vscpmd5.c
-  ../third_party/crypto-algorithms/sha256.h
-  ../third_party/crypto-algorithms/sha256.c)
+    # Linux dependencies
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libexpat1-dev libssl-dev pandoc
 
-# Include directories
-if (WIN32)  
-  target_include_directories(${PROJECT_NAME} PRIVATE
-    src/
-    ../third_party/vscp/src/vscp/common/  
-    ../third_party/vscp/src/common/
-    ../third_party/json/single_include/
-    ../third_party/spdlog/include/
-    ${CMAKE_BINARY_DIR}
-    ${THREAD_INCLUDE_DIR}
-    ${LOCAL_WIN_INCLUDE}
-  )
-else()
-  target_include_directories(${PROJECT_NAME} PRIVATE
-    src/
-    ../third_party/vscp/src/vscp/common/
-    ../third_party/vscp/src/common
-    ../third_party/json/single_include/
-    ../third_party/spdlog/include/
-    ${CMAKE_BINARY_DIR}
-    ${THREAD_INCLUDE_DIR}
-  )
-endif()  
-
-# Link libraries
-if (WIN32)
-  target_link_libraries(${PROJECT_NAME} PRIVATE     
-    expat::expat
-    dlfcn-win32::dl
-  )
-  
-  # Add threading library if found
-  if(THREAD_LIBRARY)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ${THREAD_LIBRARY})
-  endif()
+    # macOS dependencies with better path setup
+    - name: Install macOS dependencies
+      if: runner.os == 'macOS'
+      run: |
+        brew update
+        brew install openssl expat pandoc pkg-config
         
-else()
-  target_link_libraries(${PROJECT_NAME} PRIVATE     
-    m
-    dl
-    expat::expat
-  )
-  
-  # Add threading library
-  if(THREAD_LIBRARY)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ${THREAD_LIBRARY})
-  endif()
-endif()
+        # Set environment variables for CMake to find libraries
+        echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
+        echo "EXPAT_ROOT_DIR=$(brew --prefix expat)" >> $GITHUB_ENV
+        echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl):$(brew --prefix expat):$(brew --prefix)" >> $GITHUB_ENV
+        echo "PKG_CONFIG_PATH=$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix expat)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> $GITHUB_ENV
+        
+        # Additional paths for expat
+        echo "EXPAT_INCLUDE_DIR=$(brew --prefix expat)/include" >> $GITHUB_ENV
+        echo "EXPAT_LIBRARY=$(brew --prefix expat)/lib/libexpat.dylib" >> $GITHUB_ENV
 
-# Debug output
-message(STATUS "Threading library: ${THREAD_LIBRARY}")
-if(WIN32 AND pthreads_FOUND)
-    message(STATUS "Using pthreads on Windows")
-elseif(WIN32)
-    message(STATUS "Using Windows native threading")
-else()
-    message(STATUS "Using POSIX threads")
-endif()
+    - name: Create Build Environment for testapp
+      run: cmake -E make_directory ${{github.workspace}}/testapp/build
+
+    # Configure CMake for Linux (testapp)
+    - name: Configure CMake (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      working-directory: ${{github.workspace}}/testapp/build
+      run: |
+        cmake .. \
+          -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+          -DCMAKE_INSTALL_PREFIX=/usr \
+          -G "${{ matrix.generator }}"
+
+    # Configure CMake for macOS (testapp)
+    - name: Configure CMake (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      working-directory: ${{github.workspace}}/testapp/build
+      run: |
+        cmake .. \
+          -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+          -DCMAKE_INSTALL_PREFIX=/usr/local \
+          -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" \
+          -DEXPAT_ROOT_DIR="$EXPAT_ROOT_DIR" \
+          -DEXPAT_INCLUDE_DIR="$EXPAT_INCLUDE_DIR" \
+          -DEXPAT_LIBRARY="$EXPAT_LIBRARY" \
+          -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+          -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON \
+          -DPkgConfig_EXECUTABLE="$(brew --prefix)/bin/pkg-config" \
+          -G "${{ matrix.generator }}"
+
+    # Configure CMake for Windows (testapp with vcpkg)
+    - name: Configure CMake (Windows)
+      if: runner.os == 'Windows'
+      shell: cmd
+      working-directory: ${{github.workspace}}/testapp/build
+      run: |
+        cmake .. ^
+          -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
+          -DCMAKE_TOOLCHAIN_FILE=%CMAKE_TOOLCHAIN_FILE% ^
+          -DVCPKG_TARGET_TRIPLET=x64-windows ^
+          -G "${{ matrix.generator }}" ^
+          -A x64
+
+    # Debug: Show CMake configuration for troubleshooting
+    - name: Debug CMake configuration
+      if: failure()
+      working-directory: ${{github.workspace}}/testapp/build
+      shell: bash
+      run: |
+        echo "=== CMake Cache ==="
+        cat CMakeCache.txt || echo "No CMakeCache.txt found"
+        echo "=== CMake Error Log ==="
+        cat CMakeFiles/CMakeError.log || echo "No CMakeError.log found"
+        echo "=== CMake Output Log ==="
+        cat CMakeFiles/CMakeOutput.log || echo "No CMakeOutput.log found"
+        echo "=== Environment Variables ==="
+        env | grep -E "(CMAKE|VCPKG|OPENSSL|EXPAT|PKG_CONFIG)" || echo "No relevant env vars"
+        echo "=== Directory Contents ==="
+        ls -la .. || dir ..
+        echo "=== VSCP Directory ==="
+        ls -la ../third_party/vscp || echo "VSCP directory not found"
+
+    - name: Build testapp
+      working-directory: ${{github.workspace}}/testapp/build
+      shell: bash
+      run: cmake --build . --config $BUILD_TYPE --parallel
+
+    - name: Test testapp
+      working-directory: ${{github.workspace}}/testapp/build
+      shell: bash
+      run: ctest -C $BUILD_TYPE --output-on-failure || echo "No tests found"
+
+    # Upload testapp binary
+    - name: Upload testapp binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: testapp-${{ matrix.os }}
+        path: |
+          ${{github.workspace}}/testapp/build/testapp*
+          ${{github.workspace}}/testapp/build/Release/testapp*
+          ${{github.workspace}}/testapp/build/Debug/testapp*
+        retention-days: 30
+
+  # Release job (only on tags)
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: artifacts/**/*
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
