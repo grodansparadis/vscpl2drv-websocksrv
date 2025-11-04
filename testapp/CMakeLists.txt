@@ -39,9 +39,29 @@ if(WIN32)
   add_definitions(-D_WINSOCK_DEPRECATED_NO_WARNINGS)
 endif() 
 
-# pthreads
-#set (THREADS_PREFER_PTHREAD_FLAG ON)
-#find_package(Threads REQUIRED)
+# Threading support - cross-platform
+if(WIN32)
+    # On Windows with vcpkg, use the pthreads package
+    find_package(pthreads CONFIG QUIET)
+    if(pthreads_FOUND)
+        message(STATUS "Found pthreads via vcpkg")
+        set(THREAD_LIBRARY PThreads4W::PThreads4W)
+        set(THREAD_INCLUDE_DIR "")  # vcpkg handles includes automatically
+    else()
+        # Fallback to Windows threads
+        message(STATUS "Using Windows native threads")
+        set(CMAKE_USE_WIN32_THREADS_INIT 1)
+        set(CMAKE_USE_PTHREADS_INIT 0)
+        set(THREAD_LIBRARY "")
+        set(THREAD_INCLUDE_DIR "")
+    endif()
+else()
+    # Unix/Linux/macOS - use standard pthread
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
+    find_package(Threads REQUIRED)
+    set(THREAD_LIBRARY Threads::Threads)
+    set(THREAD_INCLUDE_DIR "")
+endif()
 
 #openssl
 #find_package(OpenSSL REQUIRED)
@@ -50,7 +70,9 @@ endif()
 find_package(expat CONFIG REQUIRED)
 
 # dlfcn
-find_package(dlfcn-win32 CONFIG REQUIRED)
+if (WIN32)
+    find_package(dlfcn-win32 CONFIG REQUIRED)
+endif()
 
 add_executable(${PROJECT_NAME})
 target_sources(${PROJECT_NAME} PRIVATE main.cpp
@@ -61,8 +83,6 @@ target_sources(${PROJECT_NAME} PRIVATE main.cpp
   ../third_party/vscp/src/vscp/common/vscp.h
   ../third_party/vscp/src/vscp/common/vscpdatetime.h
   ../third_party/vscp/src/vscp/common/vscpdatetime.cpp
-  ../third_party/vscp/src/vscp/common/guid.h
-  ../third_party/vscp/src/vscp/common/guid.cpp
   ../third_party/vscp/src/vscp/common/vscphelper.h
   ../third_party/vscp/src/vscp/common/vscphelper.cpp
   ../third_party/vscp/src/vscp/common/canal.h
@@ -79,44 +99,61 @@ target_sources(${PROJECT_NAME} PRIVATE main.cpp
   ../third_party/crypto-algorithms/sha256.h
   ../third_party/crypto-algorithms/sha256.c)
 
+# Include directories
 if (WIN32)  
-  
-  find_package(pthreads REQUIRED)
-  find_path(PTHREAD_INCLUDE_DIR pthread.h)
-
-  include_directories( PUBLIC src/
+  target_include_directories(${PROJECT_NAME} PRIVATE
+    src/
     ../third_party/vscp/src/vscp/common/  
     ../third_party/vscp/src/common/
     ../third_party/json/single_include/
     ../third_party/spdlog/include/
-    ${PThreads4W_INCLUDE_DIR}
     ${CMAKE_BINARY_DIR}
-    ${OPENSSL_INCLUDE_DIR}
-    ${DLFCN_INCLUDES}
-    ${LOCAL_WIN_INCLUDE})
+    ${THREAD_INCLUDE_DIR}
+    ${LOCAL_WIN_INCLUDE}
+  )
 else()
-  include_directories( PUBLIC src/
+  target_include_directories(${PROJECT_NAME} PRIVATE
+    src/
     ../third_party/vscp/src/vscp/common/
     ../third_party/vscp/src/common
     ../third_party/json/single_include/
     ../third_party/spdlog/include/
     ${CMAKE_BINARY_DIR}
-    ${OPENSSL_INCLUDE_DIR})
- endif()  
+    ${THREAD_INCLUDE_DIR}
+  )
+endif()  
 
- if (WIN32)
+# Link libraries
+if (WIN32)
   target_link_libraries(${PROJECT_NAME} PRIVATE     
-    #PThreads4W::PThreads4W_CXXEXC
     expat::expat
     dlfcn-win32::dl
   )
+  
+  # Add threading library if found
+  if(THREAD_LIBRARY)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${THREAD_LIBRARY})
+  endif()
         
 else()
   target_link_libraries(${PROJECT_NAME} PRIVATE     
     m
     dl
-    Threads::Threads
     expat::expat
-    ${EXPAT_LIBRARIES}
   )
+  
+  # Add threading library
+  if(THREAD_LIBRARY)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${THREAD_LIBRARY})
+  endif()
+endif()
+
+# Debug output
+message(STATUS "Threading library: ${THREAD_LIBRARY}")
+if(WIN32 AND pthreads_FOUND)
+    message(STATUS "Using pthreads on Windows")
+elseif(WIN32)
+    message(STATUS "Using Windows native threading")
+else()
+    message(STATUS "Using POSIX threads")
 endif()

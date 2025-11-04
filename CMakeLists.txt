@@ -181,22 +181,24 @@ ENDIF(EXISTS "${CMAKE_ROOT}/Modules/CPack.cmake")
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-# pthreads
-#set (THREADS_PREFER_PTHREAD_FLAG ON)
-#find_package(Threads REQUIRED)
+# Threading support - cross-platform
+if(WIN32)
+    # On Windows, use PThreads4W
+    find_package(PThreads4W REQUIRED)
+    set(THREAD_LIBRARIES PThreads4W::PThreads4W_CXXEXC)
+    set(PTHREAD_INCLUDE_DIR ${PThreads4W_INCLUDE_DIR})
+else()
+    # Unix/Linux/macOS - use standard pthread
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
+    find_package(Threads REQUIRED)
+    set(THREAD_LIBRARIES Threads::Threads)
+endif()
 
 #openssl
 find_package(OpenSSL REQUIRED)
 
 # Expat C library
 find_package(expat CONFIG REQUIRED)
-
-# Windows Libs
-if (WIN32)
-  #find_package(pthreads REQUIRED)
-else()
-
-endif()
 
 set(RESOURCE_FILES
         README.md
@@ -246,7 +248,8 @@ if (WIN32)
     ./third_party/json/single_include/
     ./third_party/Mustache/
     ./third_party/spdlog/include/
-    ${PThreads4W_INCLUDE_DIR}
+    #${PThreads4W_INCLUDE_DIR}
+    ${PTHREAD_INCLUDE_DIR}
     ${CMAKE_BINARY_DIR}
     ${OPENSSL_INCLUDE_DIR}
     ${LOCAL_WIN_INCLUDE}
@@ -267,7 +270,8 @@ else()
 
 if (WIN32)
   target_link_libraries(${PROJECT_NAME} PRIVATE     
-    PThreads4W::PThreads4W_CXXEXC
+#    PThreads4W::PThreads4W_CXXEXC
+    ${THREAD_LIBRARIES}
     OpenSSL::SSL 
     OpenSSL::Crypto
     OpenSSL::SSL OpenSSL::Crypto
@@ -278,7 +282,8 @@ else()
   target_link_libraries(${PROJECT_NAME} PRIVATE     
     m
     dl
-    Threads::Threads
+    #Threads::Threads
+    ${THREAD_LIBRARIES}
     OpenSSL::SSL 
     OpenSSL::Crypto
     expat::expat
