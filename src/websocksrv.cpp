@@ -72,7 +72,6 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/ioctl.h>
-#include <sys/msg.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
