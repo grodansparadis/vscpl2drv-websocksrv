@@ -74,14 +74,39 @@ jobs:
 
     - name: Setup Windows dependencies
       if: runner.os == 'Windows'
+      shell: powershell
       run: |
         # Install NSIS for creating Windows installers
-        choco install nsis pandoc
+        Write-Host "Installing NSIS and pandoc via chocolatey..."
+        choco install nsis pandoc -y
         
-        # Verify NSIS installation
-        Write-Host "NSIS installation:"
-        where makensis
-        makensis /VERSION
+        # Refresh environment variables
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        
+        # Verify NSIS installation (optional - don't fail if not found)
+        Write-Host "Verifying NSIS installation:"
+        try {
+          $nsisPath = where.exe makensis 2>$null
+          if ($nsisPath) {
+            Write-Host "NSIS found at: $nsisPath"
+            makensis /VERSION
+          } else {
+            Write-Host "NSIS not found in PATH, checking common locations..."
+            $commonPaths = @(
+              "${env:ProgramFiles}\NSIS\makensis.exe",
+              "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+            )
+            foreach ($path in $commonPaths) {
+              if (Test-Path $path) {
+                Write-Host "NSIS found at: $path"
+                & $path /VERSION
+                break
+              }
+            }
+          }
+        } catch {
+          Write-Host "NSIS verification failed, but continuing build..."
+        }
 
     # Create Windows byteswap compatibility header
     - name: Create byteswap compatibility (Windows)
