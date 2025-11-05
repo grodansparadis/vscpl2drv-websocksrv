@@ -127,6 +127,7 @@ jobs:
     # Test Visual Studio compiler (Windows)
     - name: Test Visual Studio Compiler (Windows)
       if: runner.os == 'Windows'
+      shell: powershell
       run: |
         Write-Host "Testing Visual Studio environment..."
         where cl.exe
@@ -184,9 +185,9 @@ jobs:
     #       -DPkgConfig_EXECUTABLE="$(brew --prefix)/bin/pkg-config" \
     #       -G "${{ matrix.generator }}"
 
-    # Debug: Show CMake configuration for troubleshooting
-    - name: Debug CMake configuration
-      if: failure()
+    # Debug: Show CMake configuration for troubleshooting (Linux)
+    - name: Debug CMake configuration (Linux)
+      if: failure() && runner.os == 'Linux'
       working-directory: ${{github.workspace}}/build
       shell: bash
       run: |
@@ -209,15 +210,58 @@ jobs:
         echo "=== CMakeFiles Directory ==="
         ls -la CMakeFiles/ || echo "No CMakeFiles directory"
 
-    - name: Build
+    # Debug: Show CMake configuration for troubleshooting (Windows)
+    - name: Debug CMake configuration (Windows)
+      if: failure() && runner.os == 'Windows'
+      working-directory: ${{github.workspace}}/build
+      shell: powershell
+      run: |
+        Write-Host "=== System Information ==="
+        Write-Host "OS: ${{ runner.os }}"
+        Write-Host "Matrix OS: ${{ matrix.os }}"
+        Write-Host "Generator: ${{ matrix.generator }}"
+        Write-Host "=== CMake Cache ==="
+        if (Test-Path "CMakeCache.txt") { Get-Content "CMakeCache.txt" } else { Write-Host "No CMakeCache.txt found" }
+        Write-Host "=== CMake Error Log ==="
+        if (Test-Path "CMakeFiles/CMakeError.log") { Get-Content "CMakeFiles/CMakeError.log" } else { Write-Host "No CMakeError.log found" }
+        Write-Host "=== CMake Output Log ==="
+        if (Test-Path "CMakeFiles/CMakeOutput.log") { Get-Content "CMakeFiles/CMakeOutput.log" } else { Write-Host "No CMakeOutput.log found" }
+        Write-Host "=== Environment Variables ==="
+        Get-ChildItem env: | Where-Object {$_.Name -match "(CMAKE|VCPKG|OPENSSL|EXPAT|PKG_CONFIG|VS|MSVC)"} | Format-Table Name, Value -AutoSize
+        Write-Host "=== Directory Contents ==="
+        Get-ChildItem -Force
+        Write-Host "=== VSCP Directory ==="
+        if (Test-Path "../vscp") { Get-ChildItem "../vscp" } else { Write-Host "VSCP directory not found" }
+        Write-Host "=== CMakeFiles Directory ==="
+        if (Test-Path "CMakeFiles") { Get-ChildItem "CMakeFiles" } else { Write-Host "No CMakeFiles directory" }
+
+    # Build (Linux)
+    - name: Build (Linux)
+      if: runner.os == 'Linux'
       working-directory: ${{github.workspace}}/build
       shell: bash
       run: cmake --build . --config $BUILD_TYPE --parallel
 
-    - name: Test
+    # Build (Windows)
+    - name: Build (Windows)
+      if: runner.os == 'Windows'
+      working-directory: ${{github.workspace}}/build
+      shell: powershell
+      run: cmake --build . --config $env:BUILD_TYPE --parallel
+
+    # Test (Linux)
+    - name: Test (Linux)
+      if: runner.os == 'Linux'
       working-directory: ${{github.workspace}}/build
       shell: bash
       run: ctest -C $BUILD_TYPE --output-on-failure || echo "No tests defined"
+
+    # Test (Windows)
+    - name: Test (Windows)
+      if: runner.os == 'Windows'
+      working-directory: ${{github.workspace}}/build
+      shell: powershell
+      run: ctest -C $env:BUILD_TYPE --output-on-failure; if ($LASTEXITCODE -ne 0) { Write-Host "No tests defined or tests failed" }
 
     # Package for Linux
     - name: Package (Linux)
@@ -235,13 +279,14 @@ jobs:
     - name: Package (Windows)
       if: runner.os == 'Windows'
       working-directory: ${{github.workspace}}/build
-      shell: bash
+      shell: powershell
       run: |
         # Try different package generators for Windows
-        cpack -G ZIP . || echo "ZIP package creation failed or not configured"
-        cpack -G NSIS . || echo "NSIS package creation failed or not configured"
-        cpack -G WIX . || echo "WIX package creation failed or not configured"
-        ls -la *.exe *.msi *.zip 2>/dev/null || echo "No packages generated"
+        try { cpack -G ZIP . } catch { Write-Host "ZIP package creation failed or not configured" }
+        try { cpack -G NSIS . } catch { Write-Host "NSIS package creation failed or not configured" }
+        try { cpack -G WIX . } catch { Write-Host "WIX package creation failed or not configured" }
+        Get-ChildItem -Filter "*.exe", "*.msi", "*.zip" -ErrorAction SilentlyContinue | Format-Table Name, Length -AutoSize
+        if (-not (Get-ChildItem -Filter "*.exe", "*.msi", "*.zip" -ErrorAction SilentlyContinue)) { Write-Host "No packages generated" }
 
     # Package for macOS (uncomment when ready)
     # - name: Package (macOS)
