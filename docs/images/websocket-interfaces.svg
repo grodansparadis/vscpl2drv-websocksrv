@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="210mm"
+   height="297mm"
+   viewBox="0 0 210 297"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4.2 (ebf0e940d0, 2025-05-08)"
+   sodipodi:docname="websocket-interfaces.svg"
+   inkscape:export-filename="websocket-interfaces.png"
+   inkscape:export-xdpi="96"
+   inkscape:export-ydpi="96"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="0.7180275"
+     inkscape:cx="395.52803"
+     inkscape:cy="529.22764"
+     inkscape:window-width="1878"
+     inkscape:window-height="1011"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs1">
+    <rect
+       x="13.380289"
+       y="308.99169"
+       width="107.78499"
+       height="65.732851"
+       id="rect12" />
+  </defs>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <rect
+       style="fill:#e9ddaf;fill-opacity:0.979858;stroke:#03130f;stroke-width:0.783;stroke-opacity:0.9644"
+       id="rect1"
+       width="60.063274"
+       height="118.65261"
+       x="61.905708"
+       y="29.455889"
+       inkscape:export-filename="websocket-interfaces.png"
+       inkscape:export-xdpi="96"
+       inkscape:export-ydpi="96" />
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.46667px;font-family:AnjaliOldLipi;-inkscape-font-specification:'AnjaliOldLipi, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#666666;fill-opacity:0.979858;stroke:#2a7f6a;stroke-width:0.783;stroke-opacity:0.9644"
+       x="53.882824"
+       y="162.50249"
+       id="text2"><tspan
+         sodipodi:role="line"
+         id="tspan2"
+         style="font-style:normal;font-variant:normal;font-weight:200;font-stretch:normal;font-size:8.46667px;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans, Ultra-Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#666666;stroke:#2a7f6a;stroke-width:0.783;stroke-opacity:0.9644"
+         x="53.882824"
+         y="162.50249">http://localhost:8884</tspan><tspan
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.46667px;font-family:AnjaliOldLipi;-inkscape-font-specification:'AnjaliOldLipi, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#666666;stroke:#2a7f6a;stroke-width:0.783;stroke-opacity:0.9644"
+         x="53.882824"
+         y="173.08583"
+         id="tspan3" /></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.46667px;font-family:AnjaliOldLipi;-inkscape-font-specification:'AnjaliOldLipi, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#008080;fill-opacity:0.979858;stroke:#2b7e6a;stroke-width:0.783;stroke-opacity:0.984314"
+       x="53.882824"
+       y="175.18538"
+       id="text2-5"><tspan
+         sodipodi:role="line"
+         id="tspan2-4"
+         style="font-style:normal;font-variant:normal;font-weight:200;font-stretch:normal;font-size:8.46667px;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans, Ultra-Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#6c5d53;fill-opacity:0.979858;stroke:#2b7e6a;stroke-width:0.783;stroke-opacity:0.984314"
+         x="53.882824"
+         y="175.18538">https://localhost:8884</tspan><tspan
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.46667px;font-family:AnjaliOldLipi;-inkscape-font-specification:'AnjaliOldLipi, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;stroke:#2b7e6a;stroke-width:0.783;stroke-opacity:0.984314"
+         x="53.882824"
+         y="185.76872"
+         id="tspan3-7" /></text>
+    <path
+       style="fill:#008080;fill-opacity:0.979858;stroke:#196bc4;stroke-width:0.991839;stroke-opacity:0.9644"
+       d="m 122.36135,49.850098 29.82264,0.591322"
+       id="path3" />
+    <path
+       style="fill:#008080;fill-opacity:0.979858;stroke:#1c4fba;stroke-width:0.783;stroke-opacity:0.9644"
+       d="m 122.35564,76.442741 h 29.09225"
+       id="path4" />
+    <path
+       style="fill:#008080;fill-opacity:0.979858;stroke:#165eb3;stroke-width:0.783;stroke-opacity:0.9644"
+       d="m 122.53988,99.704368 h 28.72376"
+       id="path5" />
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.46667px;font-family:AnjaliOldLipi;-inkscape-font-specification:'AnjaliOldLipi, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#008080;fill-opacity:0.979858;stroke:#2b7d69;stroke-width:0.783;stroke-opacity:0.996078"
+       x="157.61185"
+       y="52.382423"
+       id="text5"><tspan
+         sodipodi:role="line"
+         id="tspan5"
+         style="font-style:normal;font-variant:normal;font-weight:200;font-stretch:normal;font-size:8.46667px;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans, Ultra-Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;stroke:#2b7d69;stroke-width:0.783;stroke-opacity:0.996078"
+         x="157.61185"
+         y="52.382423">/ws1</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.46667px;font-family:AnjaliOldLipi;-inkscape-font-specification:'AnjaliOldLipi, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#008080;fill-opacity:0.979858;stroke:#2c7d69;stroke-width:0.783;stroke-opacity:1"
+       x="156.97519"
+       y="76.911568"
+       id="text6"><tspan
+         sodipodi:role="line"
+         id="tspan6"
+         style="font-style:normal;font-variant:normal;font-weight:200;font-stretch:normal;font-size:8.46667px;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans, Ultra-Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;stroke:#2c7d69;stroke-width:0.783;stroke-opacity:1"
+         x="156.97519"
+         y="76.911568">/ws2</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.46667px;font-family:AnjaliOldLipi;-inkscape-font-specification:'AnjaliOldLipi, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#008080;fill-opacity:0.979858;stroke:#2a7e69;stroke-width:0.783;stroke-opacity:0.807843"
+       x="158.35399"
+       y="101.33736"
+       id="text7"><tspan
+         sodipodi:role="line"
+         id="tspan12"
+         style="font-style:normal;font-variant:normal;font-weight:200;font-stretch:normal;font-size:8.46667px;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans, Ultra-Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal"
+         x="158.35399"
+         y="101.33736">/tmp/www</tspan></text>
+    <path
+       style="fill:#800000;fill-opacity:0.979858;stroke:#1c7ed7;stroke-width:1.583;stroke-opacity:0.9644"
+       d="m 62.505661,89.1822 h -26.344 v -1.1e-5"
+       id="path7" />
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.46667px;font-family:AnjaliOldLipi;-inkscape-font-specification:'AnjaliOldLipi, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000080;fill-opacity:0.979858;stroke:#2a7e69;stroke-width:0.783;stroke-opacity:0.807843"
+       x="3.5402014"
+       y="81.754051"
+       id="text8"><tspan
+         sodipodi:role="line"
+         id="tspan8"
+         style="font-style:normal;font-variant:normal;font-weight:200;font-stretch:normal;font-size:8.46667px;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans, Ultra-Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#5d6c53;fill-opacity:0.979858;stroke:#2a7e69;stroke-width:0.783;stroke-opacity:0.807843"
+         x="3.5402014"
+         y="81.754051">VSCP</tspan><tspan
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:200;font-stretch:normal;font-size:8.46667px;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans, Ultra-Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#5d6c53;fill-opacity:0.979858;stroke:#2a7e69;stroke-width:0.783;stroke-opacity:0.807843"
+         x="3.5402014"
+         y="93.704918"
+         id="tspan9">Level II</tspan><tspan
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:200;font-stretch:normal;font-size:8.46667px;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans, Ultra-Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#5d6c53;fill-opacity:0.979858;stroke:#2a7e69;stroke-width:0.783;stroke-opacity:0.807843"
+         x="3.5402014"
+         y="105.65578"
+         id="tspan10">interface</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.46667px;font-family:Sans;-inkscape-font-specification:'Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#00ffff;fill-opacity:0.979858;stroke:#03130f;stroke-width:0.783;stroke-opacity:0.9644"
+       x="-132.7648"
+       y="93.785263"
+       id="text11"
+       transform="rotate(-90.413563)"><tspan
+         sodipodi:role="line"
+         id="tspan14"
+         x="-132.7648"
+         y="93.785263">vscpl2drv-websocksrv</tspan></text>
+    <text
+       xml:space="preserve"
+       transform="scale(0.26458333)"
+       id="text12"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:32px;font-family:AnjaliOldLipi;-inkscape-font-specification:'AnjaliOldLipi, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;white-space:pre;shape-inside:url(#rect12);display:inline;fill:#00ffff;fill-opacity:0.979858;stroke:#03130f;stroke-width:2.95937;stroke-opacity:0.9644" />
+  </g>
+</svg>

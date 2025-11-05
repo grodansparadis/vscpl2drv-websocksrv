@@ -3,17 +3,39 @@
 <img src="https://vscp.org/images/logo.png" width="100">
 
 
-  * **Available for**: Linux, Windows
+  * **Available for**: Linux, Windows, MacOS
   * **Driver Linux**: libvscpl2drv-websocksrv.so
   * **Driver Windows**: vscpl2drv-websocksrv.dll
+  * **Driver MacOS**: libvscpl2drv-websocksrv.dylib
 
----
+![](./docs/images/websocket-interfaces.png)
+
+  * [Introduction](#introduction)
+  * [Install the driver on Linux](#install-the-driver-on-linux)
+  * [Install the driver on Windows](#install-the-driver-on-windows)
+  * [Install the driver on MacOS](#install-the-driver-on-macos)
+  * [How to build the driver from source on Linux](#how-to-build-the-driver-from-source-on-linux)
+  * [How to build the driver from source on Windows](#how-to-build-the-driver-from-source-on-windows)
+  * [How to build the driver from source on MacOS](#how-to-build-the-driver-from-source-on-macos)
+  * [Configuration](#configuration)
+    * [Linux](#linux)
+      * [VSCP daemon driver config](#vscp-daemon-driver-config)
+      * [vscpl2drv-websocksrv driver config](#vscpl2drv-websocksrv-driver-config)
+    * [Logging](#logging)
+    * [filter](#filter)
+    * [mask](#mask)
+
+## Introduction
 
 The websocket driver is a level II driver and act as a websocket server for the [VSCP ws1 and ws2 websocket protocols](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket). Users or IoT/m2m devices with different privileges and rights can connect to the exported interface and send/receive VSCP events. Typically this is a web based HMI or IoT/m2m device that uses the VSCP protocol to communicate. This makes it very easy to display data from the VSCP network in a web browser widget or graphical control panel.
 
 The VSCP ws1 and ws2 websocket protocols are described [here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket).
 
 With the simple interface the VSCP level II driver uses ([described here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_driver_interfaces)) it is also possible to use it with other software as a component.
+
+It is also possible to serve static web content with the driver. This can be used to serve a simple web based HMI.
+
+The connection can be secured with TLS/SSL as well as a simple user authentication mechanism.
 
 ## Install the driver on Linux
 You can install the driver using the debian package with
@@ -35,12 +57,15 @@ If you need to do dynamic configuration a good place to put the file is in the *
 A sample configuration file is make available in */usr/share/vscpl2drv-websocksrv.so* after installation.
 
 ## Install the driver on Windows
-tbd
+In the release section of this site you can find binary files for windows that will install the file for you or unpack a binary that you can copy to the location of choice yourself.
 
-## How to build the driver on Linux
+## Install the driver on MacOS
+t.b.d.
+
+## How to build the driver from source on Linux
 
 - git clone --recurse-submodules -j8 https://github.com/grodansparadis/vscpl2drv-websocksrv.git
-- sudo apt install pandoc           (comment: optional)
+- sudo apt install pandoc           (comment: *optional*)
 - sudo apt install build-essential
 - sudo apt install cmake
 - sudo apt install libexpat-dev
@@ -57,8 +82,14 @@ tbd
 
 Install of _pandoc_ is only needed if man pages needs to be rebuilt. This is normally already done and available in the repository.
 
-## How to build the driver on Windows
+## How to build the driver from source on Windows
 
+### You need a compiler
+
+The Visual Studio Community Edition is a free IDE from Microsoft. Download and install it from [here](https://visualstudio.microsoft.com/vs/community/).
+
+### Install Pandoc
+Pandoc is used to build the man pages. Download the installer from [here](https://pandoc.org/installing.html).
 
 ### Install the vcpkg package manager
 
@@ -94,27 +125,18 @@ Install the required libs
 vcpkg install pthread:x64-windows
 vcpkg install expat:x64-windows
 vcpkg install openssl:x64-windows
+vcpkg install dlfcn-win32:x64-windows
 ```
 
 Full usage is describe [here](https://docs.microsoft.com/en-us/cpp/build/manage-libraries-with-vcpkg?view=msvc-160&tabs=windows)
 
 ### Get the source
 
-You need to checkout the VSCP main repository code in addition to the driver repository. You do this with
-
 ```bash
-  git clone https://github.com/grodansparadis/vscp.git
-  cd vscp
-  git checkout development
-``` 
-
-and the vscpl2drv-websocksrv code
-
-```bash
-git clone https://github.com/grodansparadis/vscpl2drv-websocksrv.git
+git clone --recursive https://github.com/grodansparadis/vscpl2drv-websocksrv.git
 ```
 
-If you check out both at the same directory level the *-DVSCP_PATH=path-vscp-repository* in next step is not needed.
+
 
 ### Build the driver
 
@@ -124,7 +146,7 @@ Build as usual but use
 cd vscpl2drv-websocksrv
 mkdir build
 cd build
-cmake .. -CMAKE_BUILD_TYPE=Release -DVCPKG_ROOT=G:/vcpkg/ -DCMAKE_TOOLCHAIN_FILE=G:\vcpkg\scripts\buildsystems\vcpkg.cmake --build .
+cmake .. -DCMAKE_BUILD_TYPE=Release -DVCPKG_ROOT=G:/vcpkg/ -DCMAKE_TOOLCHAIN_FILE=G:/vcpkg/scripts/buildsystems/vcpkg.cmake -G "Visual Studio 17 2022" -A x64
 ```
 
 The **CMAKE_TOOLCHAIN_FILE** path may be different in your case
@@ -146,7 +168,7 @@ to your settings.json file.
 To build at the command prompt use
 
 ```bash
-msbuild vscp-works-qt.sln
+cmake --build . --config Release
 ```
 
 Note that you must have a *developer command prompt*
@@ -158,20 +180,29 @@ Install NSIS from [this site](https://sourceforge.net/projects/nsis/).
 Run 
 
 ```bash
-cpack ...
+cpack ..
 ```
  
 in the build folder.
+
+## How to build the driver from source on MacOS
+t.b.d.
 
 ---
 
 ## Configuration
 
-### Linux
-
 #### VSCP daemon driver config
 
-The VSCP daemon configuration is (normally) located at */etc/vscp/vscpd.conf*. To use the libvscpl2drv-websocksrv.so driver there must be an entry in the level2 driver section of this file
+To use the libvscpl2drv-websocksrv.so driver with the VSCP daemon there must be an entry in the level2 driver section of its configuration file. The location for the file is different for different platforms as in this table
+
+| Platform | Standard configuration file path |
+| -------- | ----------------------- |
+| Linux    | /etc/vscp/vscpd.json    |
+| Windows  | C:\users\<user>\local\vscp\vscpd.json |
+| MacOS   | /etc/vscp/vscpd.json    |
+
+The entry in the level2 driver section should look like this
 
 ```json
 "drivers": {
@@ -272,13 +303,30 @@ All level II drivers must have a unique GUID. There is many ways to obtain this 
 ##### mqtt
 See the [VSCP configuration documentation](https://grodansparadis.github.io/vscp/#/configuring_the_vscp_daemon?id=config-mqtt) for info about this section. It is common for all drivers loaded by the VSCP daemon.
 
+#### VSCP Works driver config
+
+In VSCP Works you add the driver in the connection dialog in the level II driver section. You need to set the path to the driver and the path to the configuration file as above.
+
+Using the level II driver interface as a connection in this way make it possible to open both server and client connections to VSCP websocket interfaces (and others) for debugging and development.
 
 ---
 
 
 #### vscpl2drv-websocksrv driver config
 
-On start up the configuration is read from the path set in the driver configuration of the VSCP daemon, usually */etc/vscp/conf-file-name* and values are set from this location. If the **write** parameter is set to "true" the above location is a bad choice as the host software will not be able to write to it. A better location is */var/lib/vscp/drivername/conf-file-name* or some other writable location.
+On start up the configuration is read from the path set in the driver configuration of the VSCP daemon, usually */etc/vscp/conf-file-name* and values are set from this location. 
+
+Normally you find the driver configuration file in one of these locations
+
+| Platform | Standard configuration file path |
+| -------- | ----------------------- |
+| Linux    | /etc/vscpvscpl2drv-websocksrv.json    |
+| Windows  | C:\users\<user>\local\vscp\vscpvscpl2drv-websocksrv.json |
+| MacOS   | /etc/vscp/vscpvscpl2drv-websocksrv.json    |
+
+but you can put it wherever you want as long as the application using the driver has read access to it.
+
+If the **write** parameter is set to "true" the  application that use the driver **must** be able to write to it. If this feature is used the standard locations are not the best places to put the file as they often require elevated privileges to write to.
 
 The configuration file have the following format
 
