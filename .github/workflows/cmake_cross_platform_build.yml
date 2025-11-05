@@ -43,11 +43,21 @@ jobs:
         path: vscp
         ref: development
 
-    # Windows dependencies via vcpkg
-    - name: Setup vcpkg (Windows)
+    # Setup Visual Studio environment properly for Windows
+    - name: Setup MSBuild and Visual Studio (Windows)
       if: runner.os == 'Windows'
-      uses: microsoft/setup-msbuild@v1.1
+      uses: microsoft/setup-msbuild@v1.3
+      with:
+        msbuild-architecture: x64
 
+    # Add Visual Studio Developer Command Prompt to PATH
+    - name: Setup Visual Studio Environment (Windows)
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    # Windows dependencies via vcpkg
     - name: Install vcpkg dependencies (Windows)
       if: runner.os == 'Windows'
       run: |
@@ -108,6 +118,16 @@ jobs:
     - name: Create Build Environment
       run: cmake -E make_directory ${{github.workspace}}/build
 
+    # Test Visual Studio compiler (Windows)
+    - name: Test Visual Studio Compiler (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        Write-Host "Testing Visual Studio environment..."
+        where cl.exe
+        cl.exe 2>&1 | Write-Host
+        Write-Host "Visual Studio variables:"
+        Get-ChildItem env: | Where-Object {$_.Name -match "VS|MSVC|VC"} | Format-Table Name, Value -AutoSize
+
     # Configure CMake for Linux
     - name: Configure CMake (Linux)
       if: runner.os == 'Linux'
@@ -120,22 +140,23 @@ jobs:
           -DVSCP_PATH=vscp/ \
           -G "${{ matrix.generator }}"
 
-    # Configure CMake for Windows
+    # Configure CMake for Windows (using PowerShell for better variable handling)
     - name: Configure CMake (Windows)
       if: runner.os == 'Windows'
-      shell: bash
+      shell: powershell
       working-directory: ${{github.workspace}}/build
       run: |
-        echo "VCPKG_ROOT: $VCPKG_ROOT"
-        echo "CMAKE_TOOLCHAIN_FILE: $CMAKE_TOOLCHAIN_FILE"
-        cmake $GITHUB_WORKSPACE \
-          -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-          -DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN_FILE" \
-          -DVCPKG_TARGET_TRIPLET=x64-windows \
-          -DVSCP_PATH=vscp/ \
-          -DCMAKE_CXX_FLAGS="/utf-8" \
-          -DCMAKE_C_FLAGS="/utf-8" \
-          -G "${{ matrix.generator }}" \
+        Write-Host "VCPKG_ROOT: $env:VCPKG_ROOT"
+        Write-Host "CMAKE_TOOLCHAIN_FILE: $env:CMAKE_TOOLCHAIN_FILE"
+        
+        cmake $env:GITHUB_WORKSPACE `
+          -DCMAKE_BUILD_TYPE="$env:BUILD_TYPE" `
+          "-DCMAKE_TOOLCHAIN_FILE=$env:CMAKE_TOOLCHAIN_FILE" `
+          -DVCPKG_TARGET_TRIPLET=x64-windows `
+          -DVSCP_PATH=vscp/ `
+          "-DCMAKE_CXX_FLAGS=/utf-8" `
+          "-DCMAKE_C_FLAGS=/utf-8" `
+          -G "${{ matrix.generator }}" `
           -A x64
 
     # Configure CMake for macOS (uncomment when ready)
@@ -174,11 +195,13 @@ jobs:
         echo "=== CMake Output Log ==="
         cat CMakeFiles/CMakeOutput.log || echo "No CMakeOutput.log found"
         echo "=== Environment Variables ==="
-        env | grep -E "(CMAKE|VCPKG|OPENSSL|EXPAT|PKG_CONFIG)" || echo "No relevant env vars"
+        env | grep -E "(CMAKE|VCPKG|OPENSSL|EXPAT|PKG_CONFIG|VS|MSVC)" || echo "No relevant env vars"
         echo "=== Directory Contents ==="
         ls -la . || dir .
         echo "=== VSCP Directory ==="
         ls -la ../vscp || echo "VSCP directory not found"
+        echo "=== CMakeFiles Directory ==="
+        ls -la CMakeFiles/ || echo "No CMakeFiles directory"
 
     - name: Build
       working-directory: ${{github.workspace}}/build
