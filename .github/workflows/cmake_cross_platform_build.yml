@@ -11,9 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        # Add macos-latest when ready to test on macOS
-        # os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         include:
           - os: ubuntu-latest
             triplet: x64-linux
@@ -23,11 +21,10 @@ jobs:
             triplet: x64-windows
             generator: "Visual Studio 17 2022"
             package_manager: "vcpkg"
-          # Uncomment when ready for macOS
-          # - os: macos-latest
-          #   triplet: x64-osx
-          #   generator: "Unix Makefiles"
-          #   package_manager: "brew"
+          - os: macos-latest
+            triplet: x64-osx
+            generator: "Unix Makefiles"
+            package_manager: "brew"
 
     steps:
     - name: Checkout main repository
@@ -175,18 +172,18 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libexpat1-dev libssl-dev pandoc
 
-    # macOS dependencies (uncomment when ready)
-    # - name: Install macOS dependencies
-    #   if: runner.os == 'macOS'
-    #   run: |
-    #     brew update
-    #     brew install openssl expat pandoc pkg-config
-    #     echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
-    #     echo "EXPAT_ROOT_DIR=$(brew --prefix expat)" >> $GITHUB_ENV
-    #     echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl):$(brew --prefix expat):$(brew --prefix)" >> $GITHUB_ENV
-    #     echo "PKG_CONFIG_PATH=$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix expat)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> $GITHUB_ENV
-    #     echo "EXPAT_INCLUDE_DIR=$(brew --prefix expat)/include" >> $GITHUB_ENV
-    #     echo "EXPAT_LIBRARY=$(brew --prefix expat)/lib/libexpat.dylib" >> $GITHUB_ENV
+    # macOS dependencies
+    - name: Install macOS dependencies
+      if: runner.os == 'macOS'
+      run: |
+        brew update
+        brew install openssl expat pandoc pkg-config
+        echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
+        echo "EXPAT_ROOT_DIR=$(brew --prefix expat)" >> $GITHUB_ENV
+        echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl):$(brew --prefix expat):$(brew --prefix)" >> $GITHUB_ENV
+        echo "PKG_CONFIG_PATH=$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix expat)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> $GITHUB_ENV
+        echo "EXPAT_INCLUDE_DIR=$(brew --prefix expat)/include" >> $GITHUB_ENV
+        echo "EXPAT_LIBRARY=$(brew --prefix expat)/lib/libexpat.dylib" >> $GITHUB_ENV
 
     - name: Create Build Environment
       shell: bash
@@ -279,24 +276,24 @@ jobs:
           throw
         }
 
-    # Configure CMake for macOS (uncomment when ready)
-    # - name: Configure CMake (macOS)
-    #   if: runner.os == 'macOS'
-    #   shell: bash
-    #   working-directory: ${{github.workspace}}/build
-    #   run: |
-    #     cmake $GITHUB_WORKSPACE \
-    #       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-    #       -DCMAKE_INSTALL_PREFIX=/usr/local \
-    #       -DVSCP_PATH=vscp/ \
-    #       -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" \
-    #       -DEXPAT_ROOT_DIR="$EXPAT_ROOT_DIR" \
-    #       -DEXPAT_INCLUDE_DIR="$EXPAT_INCLUDE_DIR" \
-    #       -DEXPAT_LIBRARY="$EXPAT_LIBRARY" \
-    #       -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
-    #       -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON \
-    #       -DPkgConfig_EXECUTABLE="$(brew --prefix)/bin/pkg-config" \
-    #       -G "${{ matrix.generator }}"
+    # Configure CMake for macOS
+    - name: Configure CMake (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      working-directory: ${{github.workspace}}/build
+      run: |
+        cmake $GITHUB_WORKSPACE \
+          -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+          -DCMAKE_INSTALL_PREFIX=/usr/local \
+          -DVSCP_PATH=vscp/ \
+          -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" \
+          -DEXPAT_ROOT_DIR="$EXPAT_ROOT_DIR" \
+          -DEXPAT_INCLUDE_DIR="$EXPAT_INCLUDE_DIR" \
+          -DEXPAT_LIBRARY="$EXPAT_LIBRARY" \
+          -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+          -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON \
+          -DPkgConfig_EXECUTABLE="$(brew --prefix)/bin/pkg-config" \
+          -G "${{ matrix.generator }}"
 
     # Debug: Show CMake configuration for troubleshooting (Linux)
     - name: Debug CMake configuration (Linux)
@@ -356,9 +353,9 @@ jobs:
         Write-Host "=== CMakeFiles Directory ==="
         if (Test-Path "CMakeFiles") { Get-ChildItem "CMakeFiles" } else { Write-Host "No CMakeFiles directory" }
 
-    # Build (Linux)
-    - name: Build (Linux)
-      if: runner.os == 'Linux'
+    # Build (Linux & macOS)
+    - name: Build (Linux & macOS)
+      if: runner.os == 'Linux' || runner.os == 'macOS'
       working-directory: ${{github.workspace}}/build
       shell: bash
       run: cmake --build . --config $BUILD_TYPE --parallel
@@ -379,9 +376,9 @@ jobs:
         Write-Host "Building from directory: $(Get-Location)"
         cmake --build . --config $env:BUILD_TYPE --parallel
 
-    # Test (Linux)
-    - name: Test (Linux)
-      if: runner.os == 'Linux'
+    # Test (Linux & macOS)
+    - name: Test (Linux & macOS)
+      if: runner.os == 'Linux' || runner.os == 'macOS'
       working-directory: ${{github.workspace}}/build
       shell: bash
       run: ctest -C $BUILD_TYPE --output-on-failure || echo "No tests defined"
@@ -481,15 +478,15 @@ jobs:
           Write-Host "No packages generated"
         }
 
-    # Package for macOS (uncomment when ready)
-    # - name: Package (macOS)
-    #   if: runner.os == 'macOS'
-    #   working-directory: ${{github.workspace}}/build
-    #   shell: bash
-    #   run: |
-    #     cpack -G TGZ . || echo "TGZ package creation failed or not configured"
-    #     cpack -G DragNDrop . || echo "DragNDrop package creation failed or not configured"
-    #     ls -la *.dmg *.tar.gz *.tgz 2>/dev/null || echo "No packages generated"
+    # Package for macOS
+    - name: Package (macOS)
+      if: runner.os == 'macOS'
+      working-directory: ${{github.workspace}}/build
+      shell: bash
+      run: |
+        cpack -G TGZ . || echo "TGZ package creation failed or not configured"
+        cpack -G DragNDrop . || echo "DragNDrop package creation failed or not configured"
+        ls -la *.dmg *.tar.gz *.tgz 2>/dev/null || echo "No packages generated"
 
     # Upload artifacts
     - name: Upload artifacts
