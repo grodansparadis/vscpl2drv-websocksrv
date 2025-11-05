@@ -3194,7 +3194,7 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
 
       // Start authentication
       std::string strSessionId = vscp_str_format("{\"sid\": \"%s\"}", pSession->getSid());
-      std::string str          = vscp_str_format(WS2_POSITIVE_RESPONSE, "CHALLENGE", strSessionId);
+      std::string str          = vscp_str_format(WS2_POSITIVE_RESPONSE, "CHALLENGE", strSessionId.c_str());
       mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
     }
   }
@@ -3411,7 +3411,7 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
   }
   else {
     std::string str = vscp_str_format(WS2_NEGATIVE_RESPONSE,
-                                      strCmd,
+                                      strCmd.c_str(),
                                       (int) WEBSOCK_ERROR_UNKNOWN_COMMAND,
                                       WEBSOCK_STR_ERROR_UNKNOWN_COMMAND);
     spdlog::error("[Websocket w2] Unknown command [{0}].", strCmd.c_str());
@@ -4031,7 +4031,7 @@ websockWorkerThread(void *pData)
 #ifdef WIN32
     // Wait for semaphore with 100ms timeout
     if (WaitForSingleObject(pWebSockSrv->m_semSendQueue, 100) == WAIT_OBJECT_0) {
-#else
+#elif defined(__linux__)
     struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
       /* handle error */
@@ -4043,6 +4043,20 @@ websockWorkerThread(void *pData)
       ts.tv_nsec -= 1000000000;
     }
     if (sem_timedwait(&pWebSockSrv->m_semSendQueue, &ts) == 0) {
+#else
+    // macOS and other Unix systems - use polling approach
+    bool sem_acquired = false;
+    for (int i = 0; i < 10; i++) { // Poll for 100ms total (10 * 10ms)
+      if (sem_trywait(&pWebSockSrv->m_semSendQueue) == 0) {
+        sem_acquired = true;
+        break;
+      }
+      if (errno != EAGAIN) {
+        break; // Real error
+      }
+      usleep(10000); // Sleep 10ms
+    }
+    if (sem_acquired) {
 #endif
 
       // We have an event to send
