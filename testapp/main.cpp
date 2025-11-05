@@ -48,6 +48,13 @@
 #include <vscp-class.h>
 #include <vscp-type.h>
 #include <guid.h>
+
+#ifdef _WIN32
+// Include Windows byteswap compatibility before any VSCP headers
+#include "byteswap_compat.h"
+#define byteswap_h_included  // Prevent vscphelper.h from including byteswap.h
+#endif
+
 #include <vscphelper.h>
 #include <level2drvdef.h>
 
