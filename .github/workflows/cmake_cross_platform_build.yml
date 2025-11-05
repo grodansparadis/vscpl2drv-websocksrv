@@ -76,6 +76,9 @@ jobs:
       if: runner.os == 'Windows'
       shell: powershell
       run: |
+        # Set PowerShell error handling to be more permissive for CI
+        $ErrorActionPreference = "Continue"
+        
         # Install NSIS for creating Windows installers
         Write-Host "Installing NSIS and pandoc via chocolatey..."
         choco install nsis pandoc -y
@@ -199,10 +202,26 @@ jobs:
       if: runner.os == 'Windows'
       shell: powershell
       run: |
+        # Set PowerShell error handling to be more permissive for CI
+        $ErrorActionPreference = "Continue"
+        
         Write-Host "Testing Visual Studio environment..."
-        where cl.exe
-        cl.exe 2>&1 | Write-Host
-        Write-Host "Visual Studio variables:"
+        try {
+          $clPath = where.exe cl.exe 2>$null
+          if ($clPath) {
+            Write-Host "Visual Studio compiler found at: $clPath"
+            # Run cl.exe and capture output properly
+            $clOutput = & cl.exe 2>&1 | Out-String
+            Write-Host "Compiler version information:"
+            Write-Host $clOutput
+          } else {
+            Write-Host "Visual Studio compiler (cl.exe) not found in PATH"
+          }
+        } catch {
+          Write-Host "Error testing Visual Studio compiler: $($_.Exception.Message)"
+        }
+        
+        Write-Host "Visual Studio environment variables:"
         Get-ChildItem env: | Where-Object {$_.Name -match "VS|MSVC|VC"} | Format-Table Name, Value -AutoSize
 
     # Configure CMake for Linux
@@ -222,6 +241,9 @@ jobs:
       if: runner.os == 'Windows'
       shell: powershell
       run: |
+        # Set PowerShell error handling to be more permissive for CI
+        $ErrorActionPreference = "Continue"
+        
         # Ensure build directory exists
         $buildDir = "$env:GITHUB_WORKSPACE\build"
         Write-Host "Checking build directory: $buildDir"
@@ -234,15 +256,28 @@ jobs:
         Write-Host "VCPKG_ROOT: $env:VCPKG_ROOT"
         Write-Host "CMAKE_TOOLCHAIN_FILE: $env:CMAKE_TOOLCHAIN_FILE"
         
-        cmake $env:GITHUB_WORKSPACE `
-          -DCMAKE_BUILD_TYPE="$env:BUILD_TYPE" `
-          "-DCMAKE_TOOLCHAIN_FILE=$env:CMAKE_TOOLCHAIN_FILE" `
-          -DVCPKG_TARGET_TRIPLET=x64-windows `
-          -DVSCP_PATH=vscp/ `
-          "-DCMAKE_CXX_FLAGS=/utf-8" `
-          "-DCMAKE_C_FLAGS=/utf-8" `
-          -G "${{ matrix.generator }}" `
-          -A x64
+        Write-Host "Running CMake configuration..."
+        try {
+          cmake $env:GITHUB_WORKSPACE `
+            -DCMAKE_BUILD_TYPE="$env:BUILD_TYPE" `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:CMAKE_TOOLCHAIN_FILE" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DVSCP_PATH=vscp/ `
+            "-DCMAKE_CXX_FLAGS=/utf-8" `
+            "-DCMAKE_C_FLAGS=/utf-8" `
+            -G "${{ matrix.generator }}" `
+            -A x64
+          
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "CMake configuration completed successfully"
+          } else {
+            Write-Host "CMake configuration failed with exit code: $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+        } catch {
+          Write-Host "CMake configuration error: $($_.Exception.Message)"
+          throw
+        }
 
     # Configure CMake for macOS (uncomment when ready)
     # - name: Configure CMake (macOS)
