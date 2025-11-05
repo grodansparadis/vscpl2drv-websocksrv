@@ -80,32 +80,71 @@ jobs:
         Write-Host "Installing NSIS and pandoc via chocolatey..."
         choco install nsis pandoc -y
         
-        # Refresh environment variables
+        # Force refresh of environment variables for current session
+        Write-Host "Refreshing environment variables..."
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
         
-        # Verify NSIS installation (optional - don't fail if not found)
+        # Add NSIS to PATH manually if chocolatey installed it
+        $nsisInstallPath = "${env:ProgramFiles}\NSIS"
+        if (Test-Path $nsisInstallPath) {
+          Write-Host "Adding NSIS to PATH: $nsisInstallPath"
+          $env:Path += ";$nsisInstallPath"
+        }
+        
+        # Check for NSIS in alternative location
+        $nsisInstallPathx86 = "${env:ProgramFiles(x86)}\NSIS"
+        if (Test-Path $nsisInstallPathx86) {
+          Write-Host "Adding NSIS to PATH: $nsisInstallPathx86"
+          $env:Path += ";$nsisInstallPathx86"
+        }
+        
+        # Verify NSIS installation
         Write-Host "Verifying NSIS installation:"
+        $nsisFound = $false
+        
+        # Try to find makensis in PATH
         try {
-          $nsisPath = where.exe makensis 2>$null
+          $nsisPath = Get-Command makensis -ErrorAction SilentlyContinue
           if ($nsisPath) {
-            Write-Host "NSIS found at: $nsisPath"
+            Write-Host "NSIS found in PATH: $($nsisPath.Source)"
             makensis /VERSION
-          } else {
-            Write-Host "NSIS not found in PATH, checking common locations..."
-            $commonPaths = @(
-              "${env:ProgramFiles}\NSIS\makensis.exe",
-              "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
-            )
-            foreach ($path in $commonPaths) {
-              if (Test-Path $path) {
-                Write-Host "NSIS found at: $path"
+            $nsisFound = $true
+          }
+        } catch {
+          Write-Host "makensis not found in PATH"
+        }
+        
+        # If not found in PATH, check common locations
+        if (-not $nsisFound) {
+          Write-Host "Checking common NSIS installation locations..."
+          $commonPaths = @(
+            "${env:ProgramFiles}\NSIS\makensis.exe",
+            "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+            "C:\Program Files\NSIS\makensis.exe",
+            "C:\Program Files (x86)\NSIS\makensis.exe"
+          )
+          
+          foreach ($path in $commonPaths) {
+            if (Test-Path $path) {
+              Write-Host "NSIS found at: $path"
+              try {
                 & $path /VERSION
+                $nsisFound = $true
+                # Set environment variable for later use
+                $env:NSIS_PATH = $path
+                Write-Host "Set NSIS_PATH environment variable to: $path"
                 break
+              } catch {
+                Write-Host "Failed to execute NSIS at: $path"
               }
             }
           }
-        } catch {
-          Write-Host "NSIS verification failed, but continuing build..."
+        }
+        
+        if (-not $nsisFound) {
+          Write-Host "WARNING: NSIS not found. Windows installer packages may not be available."
+        } else {
+          Write-Host "NSIS verification successful!"
         }
 
     # Create Windows byteswap compatibility header
@@ -354,10 +393,37 @@ jobs:
         }
         cd $buildDir
         Write-Host "Packaging from directory: $(Get-Location)"
+        
+        # Check if NSIS is available before trying to use it
+        $nsisAvailable = $false
+        try {
+          $nsisCmd = Get-Command makensis -ErrorAction SilentlyContinue
+          if ($nsisCmd) {
+            Write-Host "NSIS available in PATH: $($nsisCmd.Source)"
+            $nsisAvailable = $true
+          } elseif ($env:NSIS_PATH -and (Test-Path $env:NSIS_PATH)) {
+            Write-Host "NSIS available at: $env:NSIS_PATH"
+            $nsisAvailable = $true
+          }
+        } catch {
+          Write-Host "NSIS availability check failed"
+        }
+        
         # Try different package generators for Windows
+        Write-Host "Attempting ZIP package creation..."
         try { cpack -G ZIP . } catch { Write-Host "ZIP package creation failed or not configured" }
-        try { cpack -G NSIS . } catch { Write-Host "NSIS package creation failed or not configured" }
+        
+        if ($nsisAvailable) {
+          Write-Host "Attempting NSIS package creation..."
+          try { cpack -G NSIS . } catch { Write-Host "NSIS package creation failed or not configured" }
+        } else {
+          Write-Host "Skipping NSIS package creation - NSIS not available"
+        }
+        
+        Write-Host "Attempting WIX package creation..."
         try { cpack -G WIX . } catch { Write-Host "WIX package creation failed or not configured" }
+        
+        Write-Host "Generated packages:"
         Get-ChildItem -Filter "*.exe", "*.msi", "*.zip" -ErrorAction SilentlyContinue | Format-Table Name, Length -AutoSize
         if (-not (Get-ChildItem -Filter "*.exe", "*.msi", "*.zip" -ErrorAction SilentlyContinue)) { Write-Host "No packages generated" }
 
