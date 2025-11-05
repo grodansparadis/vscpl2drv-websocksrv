@@ -474,8 +474,12 @@ jobs:
         }
         
         Write-Host "Generated packages:"
-        Get-ChildItem -Filter "*.exe", "*.zip" -ErrorAction SilentlyContinue | Format-Table Name, Length -AutoSize
-        if (-not (Get-ChildItem -Filter "*.exe", "*.zip" -ErrorAction SilentlyContinue)) { Write-Host "No packages generated" }
+        $packages = Get-ChildItem -Include "*.exe", "*.zip" -ErrorAction SilentlyContinue
+        if ($packages) {
+          $packages | Format-Table Name, Length -AutoSize
+        } else {
+          Write-Host "No packages generated"
+        }
 
     # Package for macOS (uncomment when ready)
     # - name: Package (macOS)
