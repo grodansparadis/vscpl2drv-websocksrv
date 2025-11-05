@@ -176,8 +176,9 @@ jobs:
     - name: Configure CMake (Windows)
       if: runner.os == 'Windows'
       shell: powershell
-      working-directory: ${{github.workspace}}/build
       run: |
+        cd "$env:GITHUB_WORKSPACE\build"
+        Write-Host "Current directory: $(Get-Location)"
         Write-Host "VCPKG_ROOT: $env:VCPKG_ROOT"
         Write-Host "CMAKE_TOOLCHAIN_FILE: $env:CMAKE_TOOLCHAIN_FILE"
         
@@ -238,9 +239,10 @@ jobs:
     # Debug: Show CMake configuration for troubleshooting (Windows)
     - name: Debug CMake configuration (Windows)
       if: failure() && runner.os == 'Windows'
-      working-directory: ${{github.workspace}}/build
       shell: powershell
       run: |
+        cd "$env:GITHUB_WORKSPACE\build"
+        Write-Host "Current directory: $(Get-Location)"
         Write-Host "=== System Information ==="
         Write-Host "OS: ${{ runner.os }}"
         Write-Host "Matrix OS: ${{ matrix.os }}"
@@ -270,9 +272,11 @@ jobs:
     # Build (Windows)
     - name: Build (Windows)
       if: runner.os == 'Windows'
-      working-directory: ${{github.workspace}}/build
       shell: powershell
-      run: cmake --build . --config $env:BUILD_TYPE --parallel
+      run: |
+        cd "$env:GITHUB_WORKSPACE\build"
+        Write-Host "Building from directory: $(Get-Location)"
+        cmake --build . --config $env:BUILD_TYPE --parallel
 
     # Test (Linux)
     - name: Test (Linux)
@@ -284,9 +288,11 @@ jobs:
     # Test (Windows)
     - name: Test (Windows)
       if: runner.os == 'Windows'
-      working-directory: ${{github.workspace}}/build
       shell: powershell
-      run: ctest -C $env:BUILD_TYPE --output-on-failure; if ($LASTEXITCODE -ne 0) { Write-Host "No tests defined or tests failed" }
+      run: |
+        cd "$env:GITHUB_WORKSPACE\build"
+        Write-Host "Testing from directory: $(Get-Location)"
+        ctest -C $env:BUILD_TYPE --output-on-failure; if ($LASTEXITCODE -ne 0) { Write-Host "No tests defined or tests failed" }
 
     # Package for Linux
     - name: Package (Linux)
@@ -303,9 +309,10 @@ jobs:
     # Package for Windows
     - name: Package (Windows)
       if: runner.os == 'Windows'
-      working-directory: ${{github.workspace}}/build
       shell: powershell
       run: |
+        cd "$env:GITHUB_WORKSPACE\build"
+        Write-Host "Packaging from directory: $(Get-Location)"
         # Try different package generators for Windows
         try { cpack -G ZIP . } catch { Write-Host "ZIP package creation failed or not configured" }
         try { cpack -G NSIS . } catch { Write-Host "NSIS package creation failed or not configured" }
