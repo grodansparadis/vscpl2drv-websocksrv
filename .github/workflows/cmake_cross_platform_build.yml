@@ -311,8 +311,8 @@ jobs:
           -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
           -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON \
           -DPkgConfig_EXECUTABLE="$(brew --prefix)/bin/pkg-config" \
-          "-DCMAKE_C_FLAGS=-I$GITHUB_WORKSPACE -I$OPENSSL_ROOT_DIR/include" \
-          "-DCMAKE_CXX_FLAGS=-I$GITHUB_WORKSPACE -I$OPENSSL_ROOT_DIR/include" \
+          "-DCMAKE_C_FLAGS=-I$GITHUB_WORKSPACE -I$OPENSSL_ROOT_DIR/include -Wno-deprecated-declarations" \
+          "-DCMAKE_CXX_FLAGS=-I$GITHUB_WORKSPACE -I$OPENSSL_ROOT_DIR/include -Wno-deprecated-declarations" \
           "-DCMAKE_EXE_LINKER_FLAGS=-L$OPENSSL_ROOT_DIR/lib" \
           "-DCMAKE_SHARED_LINKER_FLAGS=-L$OPENSSL_ROOT_DIR/lib" \
           -G "${{ matrix.generator }}"

@@ -130,6 +130,10 @@ if(WIN32)
 elseif(UNIX)
   set(LIBS_SYSTEM c stdc++)
   add_definitions(-DMG_TLS=MG_TLS_OPENSSL)
+  if(APPLE)
+    # Suppress deprecation warnings for semaphore functions on macOS
+    add_compile_options(-Wno-deprecated-declarations)
+  endif()
 endif()
 
 #   ===========================  cpack  ===========================

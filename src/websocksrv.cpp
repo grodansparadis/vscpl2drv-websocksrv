@@ -3893,7 +3893,8 @@ websocksrv_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
       spdlog::debug("Serving static file request for {0} from web root {1}",
                     std::string(hm->uri.buf, hm->uri.len).c_str(),
                     pWebSockSrv->getWebRoot().c_str());
-      struct mg_http_serve_opts opts = { .root_dir = pWebSockSrv->getWebRoot().c_str() };
+      std::string webRoot = pWebSockSrv->getWebRoot();
+      struct mg_http_serve_opts opts = { .root_dir = webRoot.c_str() };
       mg_http_serve_dir(conn, hm, &opts);
     }
   }
