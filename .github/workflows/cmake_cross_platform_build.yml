@@ -278,8 +278,8 @@ jobs:
             "-DCMAKE_TOOLCHAIN_FILE=$env:CMAKE_TOOLCHAIN_FILE" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DVSCP_PATH=vscp/ `
-            "-DCMAKE_CXX_FLAGS=/utf-8" `
-            "-DCMAKE_C_FLAGS=/utf-8" `
+            "-DCMAKE_CXX_FLAGS=/utf-8 /I$env:GITHUB_WORKSPACE" `
+            "-DCMAKE_C_FLAGS=/utf-8 /I$env:GITHUB_WORKSPACE" `
             -G "${{ matrix.generator }}" `
             -A x64
           
@@ -311,6 +311,8 @@ jobs:
           -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
           -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON \
           -DPkgConfig_EXECUTABLE="$(brew --prefix)/bin/pkg-config" \
+          "-DCMAKE_C_FLAGS=-I$GITHUB_WORKSPACE" \
+          "-DCMAKE_CXX_FLAGS=-I$GITHUB_WORKSPACE" \
           -G "${{ matrix.generator }}"
 
     # Debug: Show CMake configuration for troubleshooting (Linux)
