@@ -75,7 +75,13 @@ jobs:
     - name: Setup Windows dependencies
       if: runner.os == 'Windows'
       run: |
-        choco install pandoc
+        # Install NSIS for creating Windows installers
+        choco install nsis pandoc
+        
+        # Verify NSIS installation
+        Write-Host "NSIS installation:"
+        where makensis
+        makensis /VERSION
 
     # Create Windows byteswap compatibility header
     - name: Create byteswap compatibility (Windows)
@@ -219,8 +225,11 @@ jobs:
       working-directory: ${{github.workspace}}/build
       shell: bash
       run: |
-        sudo cpack .
-        ls -la *.deb *.rpm *.tar.gz || true
+        # Try to create packages, but don't fail if some generators aren't available
+        cpack -G TGZ . || echo "TGZ package creation failed or not configured"
+        cpack -G DEB . || echo "DEB package creation failed or not configured"
+        cpack -G RPM . || echo "RPM package creation failed or not configured"
+        ls -la *.deb *.rpm *.tar.gz *.tgz 2>/dev/null || echo "No packages generated"
 
     # Package for Windows
     - name: Package (Windows)
@@ -228,8 +237,11 @@ jobs:
       working-directory: ${{github.workspace}}/build
       shell: bash
       run: |
-        cpack .
-        ls -la *.exe *.msi *.zip || true
+        # Try different package generators for Windows
+        cpack -G ZIP . || echo "ZIP package creation failed or not configured"
+        cpack -G NSIS . || echo "NSIS package creation failed or not configured"
+        cpack -G WIX . || echo "WIX package creation failed or not configured"
+        ls -la *.exe *.msi *.zip 2>/dev/null || echo "No packages generated"
 
     # Package for macOS (uncomment when ready)
     # - name: Package (macOS)
@@ -237,8 +249,9 @@ jobs:
     #   working-directory: ${{github.workspace}}/build
     #   shell: bash
     #   run: |
-    #     cpack .
-    #     ls -la *.dmg *.tar.gz || true
+    #     cpack -G TGZ . || echo "TGZ package creation failed or not configured"
+    #     cpack -G DragNDrop . || echo "DragNDrop package creation failed or not configured"
+    #     ls -la *.dmg *.tar.gz *.tgz 2>/dev/null || echo "No packages generated"
 
     # Upload artifacts
     - name: Upload artifacts
@@ -249,6 +262,7 @@ jobs:
           ${{github.workspace}}/build/*.deb
           ${{github.workspace}}/build/*.rpm
           ${{github.workspace}}/build/*.tar.gz
+          ${{github.workspace}}/build/*.tgz
           ${{github.workspace}}/build/*.dmg
           ${{github.workspace}}/build/*.exe
           ${{github.workspace}}/build/*.msi
