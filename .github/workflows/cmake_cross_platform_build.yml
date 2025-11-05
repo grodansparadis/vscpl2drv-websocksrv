@@ -6,7 +6,70 @@ env:
   BUILD_TYPE: Release
 
 jobs:
+  # Add a job to parse version information
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse_version.outputs.version }}
+      version_major: ${{ steps.parse_version.outputs.version_major }}
+      version_minor: ${{ steps.parse_version.outputs.version_minor }}
+      version_patch: ${{ steps.parse_version.outputs.version_patch }}
+      version_build: ${{ steps.parse_version.outputs.version_build }}
+    steps:
+    - name: Checkout main repository
+      uses: actions/checkout@v4
+      with:
+        repository: grodansparadis/vscpl2drv-websocksrv
+        submodules: 'recursive'
+
+    - name: Parse version from version.h
+      id: parse_version
+      shell: bash
+      run: |
+        # Check if version.h exists
+        VERSION_FILE="src/version.h"
+        if [ ! -f "$VERSION_FILE" ]; then
+          echo "Error: $VERSION_FILE not found"
+          exit 1
+        fi
+        
+        echo "Parsing version from $VERSION_FILE"
+        cat "$VERSION_FILE"
+        
+        # Extract version components
+        VERSION_MAJOR=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_VERSION\s+([0-9]+).*/\1/')
+        VERSION_MINOR=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION\s+([0-9]+).*/\1/')
+        VERSION_PATCH=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION\s+([0-9]+).*/\1/')
+        VERSION_BUILD=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION\s+([0-9]+).*/\1/')
+        
+        # Validate extracted values
+        if [ -z "$VERSION_MAJOR" ] || [ -z "$VERSION_MINOR" ] || [ -z "$VERSION_PATCH" ] || [ -z "$VERSION_BUILD" ]; then
+          echo "Error: Failed to extract version components"
+          echo "Major: '$VERSION_MAJOR', Minor: '$VERSION_MINOR', Patch: '$VERSION_PATCH', Build: '$VERSION_BUILD'"
+          exit 1
+        fi
+        
+        # Construct version string
+        VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}.${VERSION_BUILD}"
+        VERSION_SHORT="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
+        
+        echo "Extracted version: $VERSION"
+        echo "Short version: $VERSION_SHORT"
+        
+        # Set outputs
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "version_short=$VERSION_SHORT" >> $GITHUB_OUTPUT
+        echo "version_major=$VERSION_MAJOR" >> $GITHUB_OUTPUT
+        echo "version_minor=$VERSION_MINOR" >> $GITHUB_OUTPUT
+        echo "version_patch=$VERSION_PATCH" >> $GITHUB_OUTPUT
+        echo "version_build=$VERSION_BUILD" >> $GITHUB_OUTPUT
+        
+        # Also set as environment variables for later jobs
+        echo "PROJECT_VERSION=$VERSION" >> $GITHUB_ENV
+        echo "PROJECT_VERSION_SHORT=$VERSION_SHORT" >> $GITHUB_ENV
+
   build:
+    needs: version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -39,6 +102,17 @@ jobs:
         repository: grodansparadis/vscp
         path: vscp
         ref: development
+
+    - name: Display version information
+      shell: bash
+      run: |
+        echo "Building version: ${{ needs.version.outputs.version }}"
+        echo "Short version: ${{ needs.version.outputs.version_short }}"
+        echo "Version components:"
+        echo "  Major: ${{ needs.version.outputs.version_major }}"
+        echo "  Minor: ${{ needs.version.outputs.version_minor }}"
+        echo "  Patch: ${{ needs.version.outputs.version_patch }}"
+        echo "  Build: ${{ needs.version.outputs.version_build }}"
 
     # Setup Visual Studio environment properly for Windows
     - name: Setup MSBuild and Visual Studio (Windows)
@@ -514,7 +588,7 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: packages-${{ matrix.os }}-${{ github.sha }}
+        name: vscpl2drv-websocksrv-${{ needs.version.outputs.version }}-${{ matrix.os }}
         path: |
           ${{github.workspace}}/build/*.deb
           ${{github.workspace}}/build/*.rpm
@@ -528,7 +602,7 @@ jobs:
   # Release job (only on tags)
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: [version, build]
     runs-on: ubuntu-latest
     steps:
     - name: Download all artifacts

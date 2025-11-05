@@ -25,8 +25,42 @@
 #
 
 cmake_minimum_required(VERSION 3.5)
-project(vscpl2drv-websocksrv LANGUAGES CXX C)
+
+# Parse version from version.h file FIRST
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/version.h" VERSION_H_CONTENT)
+
+# Extract version components using regex
+string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_VERSION[ \t]+([0-9]+)" _ ${VERSION_H_CONTENT})
+set(VERSION_MAJOR ${CMAKE_MATCH_1})
+
+string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION[ \t]+([0-9]+)" _ ${VERSION_H_CONTENT})
+set(VERSION_MINOR ${CMAKE_MATCH_1})
+
+string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION[ \t]+([0-9]+)" _ ${VERSION_H_CONTENT})
+set(VERSION_PATCH ${CMAKE_MATCH_1})
+
+string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION[ \t]+([0-9]+)" _ ${VERSION_H_CONTENT})
+set(VERSION_BUILD ${CMAKE_MATCH_1})
+
+# Construct version string
+set(PROJECT_VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}.${VERSION_BUILD}")
+set(PROJECT_VERSION_SHORT "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
+
+# Now declare the project with parsed version
+project(vscpl2drv-websocksrv VERSION ${PROJECT_VERSION_SHORT} LANGUAGES CXX C)
 set(PACKAGE_AUTHOR "Ake Hedman, the VSCP Project")
+
+# Print version information
+message(STATUS "Project version: ${PROJECT_VERSION}")
+message(STATUS "Version components - Major: ${VERSION_MAJOR}, Minor: ${VERSION_MINOR}, Patch: ${VERSION_PATCH}, Build: ${VERSION_BUILD}")
+
+# Create cmake directory if it doesn't exist and configure version header
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/cmake")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/version_generated.h"
+    @ONLY
+)
 
 # Force UTF-8 encoding for MSVC to fix spdlog/fmt Unicode issues
 if(MSVC)
@@ -34,15 +68,15 @@ if(MSVC)
     message(STATUS "Added /utf-8 flag for MSVC")
 endif()
 
-# Version settings
+# Version settings (updated to use parsed values)
 if(NOT DEFINED MAJOR_VERSION)
-    SET(MAJOR_VERSION "2")
+    SET(MAJOR_VERSION "${VERSION_MAJOR}")
 endif()
 if(NOT DEFINED MINOR_VERSION)
-    SET(MINOR_VERSION "0")
+    SET(MINOR_VERSION "${VERSION_MINOR}")
 endif()
 if(NOT DEFINED PATCH_VERSION)
-    SET(PATCH_VERSION "0")
+    SET(PATCH_VERSION "${VERSION_PATCH}")
 endif()
 
 # Disable abi warnings (nlohmann)
@@ -119,7 +153,7 @@ if (NOT DEFINED VSCP_PATH)
 endif()
 
 if(WIN32)
-	add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
   add_definitions(-DWIN32_LEAN_AND_MEANS)
   add_definitions(-DOPENSSL_API_1_1)
   add_definitions(-D_POSIX_C_SOURCE)    
@@ -247,6 +281,20 @@ add_library(${PROJECT_NAME}
   ./third_party/crypto-algorithms/sha256.h
   ./third_party/crypto-algorithms/sha256.c
 ) 
+
+# NOW add the compile definitions AFTER the target is created
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    PROJECT_VERSION_MAJOR=${VERSION_MAJOR}
+    PROJECT_VERSION_MINOR=${VERSION_MINOR}
+    PROJECT_VERSION_PATCH=${VERSION_PATCH}
+    PROJECT_VERSION_BUILD=${VERSION_BUILD}
+    PROJECT_VERSION="${PROJECT_VERSION}"
+)
+
+# Add the generated version header to target include directories
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
 
 if (WIN32)
     
