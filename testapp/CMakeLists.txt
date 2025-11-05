@@ -37,6 +37,8 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 if(WIN32)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
   add_definitions(-D_WINSOCK_DEPRECATED_NO_WARNINGS)
+  add_definitions(-DWIN32)
+  add_definitions(-D_WIN32)
 endif() 
 
 # Threading support - cross-platform
