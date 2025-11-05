@@ -28,12 +28,10 @@ cmake_minimum_required(VERSION 3.5)
 project(vscpl2drv-websocksrv LANGUAGES CXX C)
 set(PACKAGE_AUTHOR "Ake Hedman, the VSCP Project")
 
-# Force UTF-8 for MSVC to fix spdlog/fmt issues
+# Force UTF-8 encoding for MSVC to fix spdlog/fmt Unicode issues
 if(MSVC)
     add_compile_options(/utf-8)
-    # Also set it as a global property
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /utf-8")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /utf-8")
+    message(STATUS "Added /utf-8 flag for MSVC")
 endif()
 
 # Version settings

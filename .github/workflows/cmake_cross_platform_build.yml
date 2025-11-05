@@ -117,16 +117,16 @@ jobs:
     # Configure CMake for Windows (testapp with vcpkg)
     - name: Configure CMake (Windows)
       if: runner.os == 'Windows'
-      shell: cmd
+      shell: powershell
       working-directory: ${{github.workspace}}/testapp/build
       run: |
-        cmake .. ^
-          -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
-          -DCMAKE_TOOLCHAIN_FILE=%CMAKE_TOOLCHAIN_FILE% ^
-          -DVCPKG_TARGET_TRIPLET=x64-windows ^
-          -DCMAKE_CXX_FLAGS="/utf-8" ^
-          -DCMAKE_C_FLAGS="/utf-8" ^
-          -G "${{ matrix.generator }}" ^
+        cmake .. `
+          -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+          -DCMAKE_TOOLCHAIN_FILE=$env:CMAKE_TOOLCHAIN_FILE `
+          -DVCPKG_TARGET_TRIPLET=x64-windows `
+          "-DCMAKE_CXX_FLAGS=/utf-8" `
+          "-DCMAKE_C_FLAGS=/utf-8" `
+          -G "${{ matrix.generator }}" `
           -A x64
 
     # Debug: Show CMake configuration for troubleshooting
