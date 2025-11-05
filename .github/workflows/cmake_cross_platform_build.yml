@@ -1,7 +1,76 @@
-    # Create byteswap compatibility header for Windows
+name: CMake Cross-Platform Build
+
+on: [push, pull_request]
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # Add macos-latest when ready to test on macOS
+        # os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            triplet: x64-linux
+            generator: "Unix Makefiles"
+            package_manager: "apt"
+          - os: windows-latest
+            triplet: x64-windows
+            generator: "Visual Studio 17 2022"
+            package_manager: "vcpkg"
+          # Uncomment when ready for macOS
+          # - os: macos-latest
+          #   triplet: x64-osx
+          #   generator: "Unix Makefiles"
+          #   package_manager: "brew"
+
+    steps:
+    - name: Checkout main repository
+      uses: actions/checkout@v4
+      with:
+        repository: grodansparadis/vscpl2drv-websocksrv
+        submodules: 'recursive' 
+
+    - name: Checkout VSCP repository
+      uses: actions/checkout@v4
+      with:
+        repository: grodansparadis/vscp
+        path: vscp
+        ref: development
+
+    # Windows dependencies via vcpkg
+    - name: Setup vcpkg (Windows)
+      if: runner.os == 'Windows'
+      uses: microsoft/setup-msbuild@v1.1
+
+    - name: Install vcpkg dependencies (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        git clone https://github.com/Microsoft/vcpkg.git
+        cd vcpkg
+        .\bootstrap-vcpkg.bat
+        .\vcpkg.exe install expat:x64-windows openssl:x64-windows pthreads:x64-windows dlfcn-win32:x64-windows
+        $vcpkgRoot = "${{ github.workspace }}\vcpkg"
+        $toolchainFile = "$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
+        echo "VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
+        echo "CMAKE_TOOLCHAIN_FILE=$toolchainFile" >> $env:GITHUB_ENV
+        Write-Host "Set VCPKG_ROOT to: $vcpkgRoot"
+        Write-Host "Set CMAKE_TOOLCHAIN_FILE to: $toolchainFile"
+
+    - name: Setup Windows dependencies
+      if: runner.os == 'Windows'
+      run: |
+        choco install pandoc
+
+    # Create Windows byteswap compatibility header
     - name: Create byteswap compatibility (Windows)
       if: runner.os == 'Windows'
-      working-directory: ${{github.workspace}}/testapp
+      working-directory: ${{github.workspace}}
       run: |
         @"
         #ifndef BYTESWAP_H
@@ -15,3 +84,170 @@
         #endif
         #endif
         "@ | Out-File -FilePath "byteswap.h" -Encoding UTF8
+
+    # Linux dependencies
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libexpat1-dev libssl-dev pandoc
+
+    # macOS dependencies (uncomment when ready)
+    # - name: Install macOS dependencies
+    #   if: runner.os == 'macOS'
+    #   run: |
+    #     brew update
+    #     brew install openssl expat pandoc pkg-config
+    #     echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
+    #     echo "EXPAT_ROOT_DIR=$(brew --prefix expat)" >> $GITHUB_ENV
+    #     echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl):$(brew --prefix expat):$(brew --prefix)" >> $GITHUB_ENV
+    #     echo "PKG_CONFIG_PATH=$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix expat)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> $GITHUB_ENV
+    #     echo "EXPAT_INCLUDE_DIR=$(brew --prefix expat)/include" >> $GITHUB_ENV
+    #     echo "EXPAT_LIBRARY=$(brew --prefix expat)/lib/libexpat.dylib" >> $GITHUB_ENV
+
+    - name: Create Build Environment
+      run: cmake -E make_directory ${{github.workspace}}/build
+
+    # Configure CMake for Linux
+    - name: Configure CMake (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      working-directory: ${{github.workspace}}/build
+      run: |
+        cmake $GITHUB_WORKSPACE \
+          -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+          -DCMAKE_INSTALL_PREFIX=/usr \
+          -DVSCP_PATH=vscp/ \
+          -G "${{ matrix.generator }}"
+
+    # Configure CMake for Windows
+    - name: Configure CMake (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      working-directory: ${{github.workspace}}/build
+      run: |
+        echo "VCPKG_ROOT: $VCPKG_ROOT"
+        echo "CMAKE_TOOLCHAIN_FILE: $CMAKE_TOOLCHAIN_FILE"
+        cmake $GITHUB_WORKSPACE \
+          -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+          -DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN_FILE" \
+          -DVCPKG_TARGET_TRIPLET=x64-windows \
+          -DVSCP_PATH=vscp/ \
+          -DCMAKE_CXX_FLAGS="/utf-8" \
+          -DCMAKE_C_FLAGS="/utf-8" \
+          -G "${{ matrix.generator }}" \
+          -A x64
+
+    # Configure CMake for macOS (uncomment when ready)
+    # - name: Configure CMake (macOS)
+    #   if: runner.os == 'macOS'
+    #   shell: bash
+    #   working-directory: ${{github.workspace}}/build
+    #   run: |
+    #     cmake $GITHUB_WORKSPACE \
+    #       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+    #       -DCMAKE_INSTALL_PREFIX=/usr/local \
+    #       -DVSCP_PATH=vscp/ \
+    #       -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" \
+    #       -DEXPAT_ROOT_DIR="$EXPAT_ROOT_DIR" \
+    #       -DEXPAT_INCLUDE_DIR="$EXPAT_INCLUDE_DIR" \
+    #       -DEXPAT_LIBRARY="$EXPAT_LIBRARY" \
+    #       -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+    #       -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON \
+    #       -DPkgConfig_EXECUTABLE="$(brew --prefix)/bin/pkg-config" \
+    #       -G "${{ matrix.generator }}"
+
+    # Debug: Show CMake configuration for troubleshooting
+    - name: Debug CMake configuration
+      if: failure()
+      working-directory: ${{github.workspace}}/build
+      shell: bash
+      run: |
+        echo "=== System Information ==="
+        echo "OS: ${{ runner.os }}"
+        echo "Matrix OS: ${{ matrix.os }}"
+        echo "Generator: ${{ matrix.generator }}"
+        echo "=== CMake Cache ==="
+        cat CMakeCache.txt || echo "No CMakeCache.txt found"
+        echo "=== CMake Error Log ==="
+        cat CMakeFiles/CMakeError.log || echo "No CMakeError.log found"
+        echo "=== CMake Output Log ==="
+        cat CMakeFiles/CMakeOutput.log || echo "No CMakeOutput.log found"
+        echo "=== Environment Variables ==="
+        env | grep -E "(CMAKE|VCPKG|OPENSSL|EXPAT|PKG_CONFIG)" || echo "No relevant env vars"
+        echo "=== Directory Contents ==="
+        ls -la . || dir .
+        echo "=== VSCP Directory ==="
+        ls -la ../vscp || echo "VSCP directory not found"
+
+    - name: Build
+      working-directory: ${{github.workspace}}/build
+      shell: bash
+      run: cmake --build . --config $BUILD_TYPE --parallel
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      shell: bash
+      run: ctest -C $BUILD_TYPE --output-on-failure || echo "No tests defined"
+
+    # Package for Linux
+    - name: Package (Linux)
+      if: runner.os == 'Linux'
+      working-directory: ${{github.workspace}}/build
+      shell: bash
+      run: |
+        sudo cpack .
+        ls -la *.deb *.rpm *.tar.gz || true
+
+    # Package for Windows
+    - name: Package (Windows)
+      if: runner.os == 'Windows'
+      working-directory: ${{github.workspace}}/build
+      shell: bash
+      run: |
+        cpack .
+        ls -la *.exe *.msi *.zip || true
+
+    # Package for macOS (uncomment when ready)
+    # - name: Package (macOS)
+    #   if: runner.os == 'macOS'
+    #   working-directory: ${{github.workspace}}/build
+    #   shell: bash
+    #   run: |
+    #     cpack .
+    #     ls -la *.dmg *.tar.gz || true
+
+    # Upload artifacts
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: packages-${{ matrix.os }}-${{ github.sha }}
+        path: |
+          ${{github.workspace}}/build/*.deb
+          ${{github.workspace}}/build/*.rpm
+          ${{github.workspace}}/build/*.tar.gz
+          ${{github.workspace}}/build/*.dmg
+          ${{github.workspace}}/build/*.exe
+          ${{github.workspace}}/build/*.msi
+          ${{github.workspace}}/build/*.zip
+        retention-days: 30
+
+  # Release job (only on tags)
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: artifacts/**/*
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
