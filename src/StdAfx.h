@@ -6,6 +6,16 @@
 #if !defined(AFX_STDAFX_H__70D8C5F1_B889_4425_8C98_2E71595A1CA7__INCLUDED_)
 #define AFX_STDAFX_H__70D8C5F1_B889_4425_8C98_2E71595A1CA7__INCLUDED_
 
+// Robust Windows platform detection for GitHub Actions and various build environments
+#if defined(_WIN32) || defined(_WIN64) || defined(__WIN32__) || defined(__TOS_WIN__) || defined(__WINDOWS__)
+#ifndef WIN32
+#define WIN32
+#endif
+#ifndef _WIN32
+#define _WIN32
+#endif
+#endif
+
 #if _MSC_VER > 1000
 #pragma once
 #endif // _MSC_VER > 1000

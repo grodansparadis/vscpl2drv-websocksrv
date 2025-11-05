@@ -26,6 +26,16 @@
 #if !defined(VSCPL2_WEBSOCKSRV_H__A388C093_AD35_4672_8BF7_DBC702C6B0C8__INCLUDED_)
 #define VSCPL2_WEBSOCKSRV_H__A388C093_AD35_4672_8BF7_DBC702C6B0C8__INCLUDED_
 
+// Robust Windows platform detection for GitHub Actions and various build environments
+#if defined(_WIN32) || defined(_WIN64) || defined(__WIN32__) || defined(__TOS_WIN__) || defined(__WINDOWS__)
+#ifndef WIN32
+#define WIN32
+#endif
+#ifndef _WIN32
+#define _WIN32
+#endif
+#endif
+
 #ifdef WIN32
 #include "StdAfx.h"
 #endif
