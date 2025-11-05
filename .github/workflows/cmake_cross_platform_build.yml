@@ -165,6 +165,24 @@ jobs:
         #endif
         "@ | Out-File -FilePath "byteswap.h" -Encoding UTF8
 
+    # Create macOS byteswap compatibility header
+    - name: Create byteswap compatibility (macOS)
+      if: runner.os == 'macOS'
+      working-directory: ${{github.workspace}}
+      run: |
+        cat > byteswap.h << 'EOF'
+        #ifndef BYTESWAP_H
+        #define BYTESWAP_H
+        #ifdef __APPLE__
+        #include <libkern/OSByteOrder.h>
+        #include <cstdint>
+        static inline uint16_t bswap_16(uint16_t x) { return OSSwapInt16(x); }
+        static inline uint32_t bswap_32(uint32_t x) { return OSSwapInt32(x); }
+        static inline uint64_t bswap_64(uint64_t x) { return OSSwapInt64(x); }
+        #endif
+        #endif
+        EOF
+
     # Linux dependencies
     - name: Install Linux dependencies
       if: runner.os == 'Linux'
