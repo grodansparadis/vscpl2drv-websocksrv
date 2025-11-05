@@ -444,57 +444,6 @@ jobs:
           Write-Host "NSIS availability check failed"
         }
         
-        # Check if WiX is available before trying to use it
-        $wixAvailable = $false
-        try {
-          # Check for WiX tools (candle.exe and light.exe)
-          $candleCmd = Get-Command candle -ErrorAction SilentlyContinue
-          $lightCmd = Get-Command light -ErrorAction SilentlyContinue
-          if ($candleCmd -and $lightCmd) {
-            Write-Host "WiX available in PATH - candle: $($candleCmd.Source), light: $($lightCmd.Source)"
-            $wixAvailable = $true
-          } else {
-            Write-Host "WiX not found in PATH, checking common installation locations..."
-            $wixPaths = @(
-              "${env:ProgramFiles}\WiX Toolset v3.11\bin",
-              "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin",
-              "${env:ProgramFiles}\Windows Installer XML v3.5\bin",
-              "${env:ProgramFiles(x86)}\Windows Installer XML v3.5\bin"
-            )
-            
-            foreach ($wixPath in $wixPaths) {
-              $candlePath = Join-Path $wixPath "candle.exe"
-              $lightPath = Join-Path $wixPath "light.exe"
-              if ((Test-Path $candlePath) -and (Test-Path $lightPath)) {
-                Write-Host "WiX found at: $wixPath"
-                $env:Path += ";$wixPath"
-                $wixAvailable = $true
-                break
-              }
-            }
-          }
-        } catch {
-          Write-Host "WiX availability check failed"
-        }
-        
-        if (-not $wixAvailable) {
-          Write-Host "Installing WiX Toolset via chocolatey..."
-          try {
-            choco install wixtoolset -y
-            # Refresh PATH
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            
-            # Check again after installation
-            $candleCmd = Get-Command candle -ErrorAction SilentlyContinue
-            if ($candleCmd) {
-              Write-Host "WiX installed successfully"
-              $wixAvailable = $true
-            }
-          } catch {
-            Write-Host "Failed to install WiX Toolset: $($_.Exception.Message)"
-          }
-        }
-        
         # Try different package generators for Windows
         Write-Host "Attempting ZIP package creation..."
         try { 
@@ -524,31 +473,9 @@ jobs:
           Write-Host "Skipping NSIS package creation - NSIS not available"
         }
         
-        if ($wixAvailable) {
-          Write-Host "Attempting WIX package creation..."
-          try { 
-            cpack -G WIX . 
-            if ($LASTEXITCODE -eq 0) {
-              Write-Host "WIX package creation succeeded"
-            } else {
-              Write-Host "WIX package creation failed with exit code: $LASTEXITCODE"
-              # Show WiX log file if it exists
-              $wixLogPath = "_CPack_Packages/win64/WIX/wix.log"
-              if (Test-Path $wixLogPath) {
-                Write-Host "WiX log file contents:"
-                Get-Content $wixLogPath | Select-Object -Last 20 | ForEach-Object { Write-Host $_ }
-              }
-            }
-          } catch { 
-            Write-Host "WIX package creation failed or not configured: $($_.Exception.Message)" 
-          }
-        } else {
-          Write-Host "Skipping WIX package creation - WiX Toolset not available"
-        }
-        
         Write-Host "Generated packages:"
-        Get-ChildItem -Filter "*.exe", "*.msi", "*.zip" -ErrorAction SilentlyContinue | Format-Table Name, Length -AutoSize
-        if (-not (Get-ChildItem -Filter "*.exe", "*.msi", "*.zip" -ErrorAction SilentlyContinue)) { Write-Host "No packages generated" }
+        Get-ChildItem -Filter "*.exe", "*.zip" -ErrorAction SilentlyContinue | Format-Table Name, Length -AutoSize
+        if (-not (Get-ChildItem -Filter "*.exe", "*.zip" -ErrorAction SilentlyContinue)) { Write-Host "No packages generated" }
 
     # Package for macOS (uncomment when ready)
     # - name: Package (macOS)
@@ -572,7 +499,6 @@ jobs:
           ${{github.workspace}}/build/*.tgz
           ${{github.workspace}}/build/*.dmg
           ${{github.workspace}}/build/*.exe
-          ${{github.workspace}}/build/*.msi
           ${{github.workspace}}/build/*.zip
         retention-days: 30
 
