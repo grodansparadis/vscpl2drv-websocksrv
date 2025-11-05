@@ -147,7 +147,13 @@ jobs:
     #     echo "EXPAT_LIBRARY=$(brew --prefix expat)/lib/libexpat.dylib" >> $GITHUB_ENV
 
     - name: Create Build Environment
-      run: cmake -E make_directory ${{github.workspace}}/build
+      shell: bash
+      run: |
+        echo "Creating build directory..."
+        cmake -E make_directory ${{github.workspace}}/build
+        echo "Build directory created. Verifying..."
+        ls -la ${{github.workspace}}/build || echo "Directory listing failed"
+        echo "Build environment ready."
 
     # Test Visual Studio compiler (Windows)
     - name: Test Visual Studio Compiler (Windows)
@@ -177,7 +183,14 @@ jobs:
       if: runner.os == 'Windows'
       shell: powershell
       run: |
-        cd "$env:GITHUB_WORKSPACE\build"
+        # Ensure build directory exists
+        $buildDir = "$env:GITHUB_WORKSPACE\build"
+        Write-Host "Checking build directory: $buildDir"
+        if (-not (Test-Path $buildDir)) {
+          Write-Host "Creating build directory..."
+          New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+        }
+        cd $buildDir
         Write-Host "Current directory: $(Get-Location)"
         Write-Host "VCPKG_ROOT: $env:VCPKG_ROOT"
         Write-Host "CMAKE_TOOLCHAIN_FILE: $env:CMAKE_TOOLCHAIN_FILE"
@@ -241,7 +254,14 @@ jobs:
       if: failure() && runner.os == 'Windows'
       shell: powershell
       run: |
-        cd "$env:GITHUB_WORKSPACE\build"
+        # Ensure build directory exists
+        $buildDir = "$env:GITHUB_WORKSPACE\build"
+        Write-Host "Checking build directory: $buildDir"
+        if (-not (Test-Path $buildDir)) {
+          Write-Host "Build directory does not exist!"
+          return
+        }
+        cd $buildDir
         Write-Host "Current directory: $(Get-Location)"
         Write-Host "=== System Information ==="
         Write-Host "OS: ${{ runner.os }}"
@@ -274,7 +294,14 @@ jobs:
       if: runner.os == 'Windows'
       shell: powershell
       run: |
-        cd "$env:GITHUB_WORKSPACE\build"
+        # Ensure build directory exists
+        $buildDir = "$env:GITHUB_WORKSPACE\build"
+        Write-Host "Checking build directory: $buildDir"
+        if (-not (Test-Path $buildDir)) {
+          Write-Host "Build directory does not exist!"
+          exit 1
+        }
+        cd $buildDir
         Write-Host "Building from directory: $(Get-Location)"
         cmake --build . --config $env:BUILD_TYPE --parallel
 
@@ -290,7 +317,14 @@ jobs:
       if: runner.os == 'Windows'
       shell: powershell
       run: |
-        cd "$env:GITHUB_WORKSPACE\build"
+        # Ensure build directory exists
+        $buildDir = "$env:GITHUB_WORKSPACE\build"
+        Write-Host "Checking build directory: $buildDir"
+        if (-not (Test-Path $buildDir)) {
+          Write-Host "Build directory does not exist!"
+          exit 1
+        }
+        cd $buildDir
         Write-Host "Testing from directory: $(Get-Location)"
         ctest -C $env:BUILD_TYPE --output-on-failure; if ($LASTEXITCODE -ne 0) { Write-Host "No tests defined or tests failed" }
 
@@ -311,7 +345,14 @@ jobs:
       if: runner.os == 'Windows'
       shell: powershell
       run: |
-        cd "$env:GITHUB_WORKSPACE\build"
+        # Ensure build directory exists
+        $buildDir = "$env:GITHUB_WORKSPACE\build"
+        Write-Host "Checking build directory: $buildDir"
+        if (-not (Test-Path $buildDir)) {
+          Write-Host "Build directory does not exist!"
+          exit 1
+        }
+        cd $buildDir
         Write-Host "Packaging from directory: $(Get-Location)"
         # Try different package generators for Windows
         try { cpack -G ZIP . } catch { Write-Host "ZIP package creation failed or not configured" }
