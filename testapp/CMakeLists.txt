@@ -28,36 +28,6 @@ cmake_minimum_required(VERSION 3.5)
 project(testapp LANGUAGES CXX C)
 set(PACKAGE_AUTHOR "Ake Hedman, the VSCP Project")
 
-# Include directories
-if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-  target_include_directories(${PROJECT_NAME} PRIVATE
-    src/
-    .  # Add current directory for byteswap_compat.h
-    ../third_party/vscp/src/vscp/common/  
-    ../third_party/vscp/src/common/
-    ../third_party/json/single_include/
-    ../third_party/spdlog/include/
-    ${CMAKE_BINARY_DIR}
-    ${THREAD_INCLUDE_DIR}
-    ${LOCAL_WIN_INCLUDE}
-  )
-  
-  # Add a compile definition to use our compatibility header
-  target_compile_definitions(${PROJECT_NAME} PRIVATE 
-    BYTESWAP_H_INCLUDED  # This prevents vscphelper.h from including byteswap.h
-  )
-else()
-  target_include_directories(${PROJECT_NAME} PRIVATE
-    src/
-    ../third_party/vscp/src/vscp/common/
-    ../third_party/vscp/src/common
-    ../third_party/json/single_include/
-    ../third_party/spdlog/include/
-    ${CMAKE_BINARY_DIR}
-    ${THREAD_INCLUDE_DIR}
-  )
-endif()
-
 # --- System Libraries ---
 include(GNUInstallDirs)
 
@@ -140,6 +110,11 @@ if (WIN32)
     ${CMAKE_BINARY_DIR}
     ${THREAD_INCLUDE_DIR}
     ${LOCAL_WIN_INCLUDE}
+
+    # Add a compile definition to use our compatibility header
+    target_compile_definitions(${PROJECT_NAME} PRIVATE 
+     BYTESWAP_H_INCLUDED  # This prevents vscphelper.h from including byteswap.h
+    )
   )
 else()
   target_include_directories(${PROJECT_NAME} PRIVATE
