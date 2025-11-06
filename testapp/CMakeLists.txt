@@ -69,7 +69,13 @@ endif()
 #find_package(OpenSSL REQUIRED)
 
 # Expat C library
-find_package(expat CONFIG REQUIRED)
+if(WIN32)
+find_package(EXPAT REQUIRED)
+else()	
+include(FindEXPAT)
+find_package(EXPAT REQUIRED)
+include_directories(${EXPAT_INCLUDE_DIRS})
+endif()
 
 # dlfcn
 if (WIN32)
@@ -146,7 +152,7 @@ else()
   target_link_libraries(${PROJECT_NAME} PRIVATE     
     m
     dl
-    expat::expat
+    ${EXPAT_LIBRARIES}
   )
   
   # Add threading library

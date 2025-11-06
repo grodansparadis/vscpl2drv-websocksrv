@@ -243,8 +243,15 @@ endif()
 #openssl
 find_package(OpenSSL REQUIRED)
 
+
 # Expat C library
-find_package(expat CONFIG REQUIRED)
+if(WIN32)
+find_package(EXPAT REQUIRED)
+else()
+include (FindEXPAT)
+find_package(EXPAT REQUIRED)
+include_directories(${EXPAT_INCLUDE_DIRS})
+endif()
 
 set(RESOURCE_FILES
         README.md
@@ -343,7 +350,7 @@ else()
     ${THREAD_LIBRARIES}
     OpenSSL::SSL 
     OpenSSL::Crypto
-    expat::expat
+    ${EXPAT_LIBRARIES}
   )
 endif()
 
