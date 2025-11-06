@@ -87,7 +87,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 #include <mongoose.h>
 #include <expat.h>
 
@@ -106,8 +105,6 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
-
-
 
 #ifdef WIN32
 // Windows socket initialization will be done in constructor
@@ -303,7 +300,7 @@ CWebSockSrv::CWebSockSrv(void)
 #ifdef WIN32
   // Initialize Windows sockets
   WSADATA wsaData;
-  int iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
+  int iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
   if (iResult != 0) {
     spdlog::error("WSAStartup failed: {0}", iResult);
   }
@@ -311,22 +308,22 @@ CWebSockSrv::CWebSockSrv(void)
 
   vscp_clearVSCPFilter(&m_rxfilter); // Accept all events
 
-  #ifdef WIN32
+#ifdef WIN32
   m_websockWorkerThread = NULL;
-  #else
+#else
   m_websockWorkerThread = 0;
-  #endif
-  m_bDebug              = false;
-  m_maxClientQueueSize  = MAX_ITEMS_IN_QUEUE;
+#endif
+  m_bDebug             = false;
+  m_maxClientQueueSize = MAX_ITEMS_IN_QUEUE;
 
-  // Initialise semaphores
-  #ifdef WIN32
-  m_semSendQueue = CreateSemaphore(NULL, 0, MAX_ITEMS_IN_QUEUE, NULL);
+// Initialise semaphores
+#ifdef WIN32
+  m_semSendQueue    = CreateSemaphore(NULL, 0, MAX_ITEMS_IN_QUEUE, NULL);
   m_semReceiveQueue = CreateSemaphore(NULL, 0, MAX_ITEMS_IN_QUEUE, NULL);
-  #else
+#else
   sem_init(&m_semSendQueue, 0, 0);
   sem_init(&m_semReceiveQueue, 0, 0);
-  #endif
+#endif
 
   // Initialise mutex
   pthread_mutex_init(&m_mutexSendQueue, NULL);
@@ -398,13 +395,13 @@ CWebSockSrv::~CWebSockSrv(void)
 {
   close();
 
-  #ifdef WIN32
+#ifdef WIN32
   CloseHandle(m_semSendQueue);
   CloseHandle(m_semReceiveQueue);
-  #else
+#else
   sem_destroy(&m_semSendQueue);
   sem_destroy(&m_semReceiveQueue);
-  #endif
+#endif
 
   pthread_mutex_destroy(&m_mutexSendQueue);
   pthread_mutex_destroy(&m_mutexReceiveQueue);
@@ -490,13 +487,52 @@ CWebSockSrv::close(void)
 int
 CWebSockSrv::doLoadConfig(std::string &path)
 {
-  try {
-    std::ifstream in(path, std::ifstream::in);
-    in >> m_j_config;
+  // Take away possible whitespace
+  vscp_trim(path);
+
+  // If first character of path is "{" expand it to home directory
+  // we expect path to be a JSON string for us to parse
+  if ('{' == path.at(0)) {
+    spdlog::info("Configuration appears to be a JSON string.");
+    try {
+      m_j_config = json::parse(path);
+    }
+    catch (json::parse_error) {
+      spdlog::critical("Failed to parse JSON configuration.");
+      return VSCP_ERROR_PARSING;
+    }
+    catch (std::exception &e) {
+      spdlog::critical("Failed to parse configuration. Exception='{}'", e.what());
+      return VSCP_ERROR_PARSING;
+    }
+    catch (...) {
+      spdlog::critical("Failed to parse configuration due to unknown error.");
+      return VSCP_ERROR_PARSING;
+    }
   }
-  catch (json::parse_error) {
-    spdlog::critical("Failed to load/parse JSON configuration.");
-    return VSCP_ERROR_PARSING;
+  // If path is a file read it
+  else if (vscp_fileExists(path)) {
+    spdlog::info("Configuration appears to be a file.");
+    try {
+      std::ifstream in(path, std::ifstream::in);
+      in >> m_j_config;
+    }
+    catch (json::parse_error) {
+      spdlog::critical("Failed to parse JSON configuration.");
+      return VSCP_ERROR_PARSING;
+    }
+    catch (std::exception &e) {
+      spdlog::critical("Failed to parse configuration. Exception='{}'", e.what());
+      return VSCP_ERROR_PARSING;
+    }
+    catch (...) {
+      spdlog::critical("Failed to parse configuration due to unknown error.");
+      return VSCP_ERROR_PARSING;
+    }
+  }
+  else {
+    // Configuration file does not exist
+    return VSCP_ERROR_PARAMETER;
   }
 
   // Enable extra debug output
@@ -1142,7 +1178,7 @@ CWebSockSrv::start(void)
   m_bQuit = false;
 
 #ifdef WIN32
-  m_websockWorkerThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)websockWorkerThread, this, 0, NULL);
+  m_websockWorkerThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE) websockWorkerThread, this, 0, NULL);
   if (m_websockWorkerThread == NULL) {
     spdlog::error("Controlobject: Unable to start the websocket worker thread.");
     return VSCP_ERROR_ERROR;
@@ -1169,23 +1205,22 @@ CWebSockSrv::stop(void)
 
   spdlog::debug("Controlobject: Terminating WebSocket thread.");
 
-  // Wait for thread to finish and clean up
-  #ifdef WIN32
+// Wait for thread to finish and clean up
+#ifdef WIN32
   if (m_websockWorkerThread == NULL) { // Check if thread was created
     // Not started
     return VSCP_ERROR_SUCCESS;
   }
   CloseHandle(m_websockWorkerThread);
   m_websockWorkerThread = NULL; // Reset thread handle
-  #else
+#else
   if (!m_websockWorkerThread) { // Check if thread was created
     // Not started
     return VSCP_ERROR_SUCCESS;
   }
   pthread_join(m_websockWorkerThread, NULL);
   m_websockWorkerThread = 0; // Reset thread ID
-  #endif
- 
+#endif
 
   spdlog::debug("Controlobject: Terminated WebSocket thread.");
 
@@ -2361,7 +2396,7 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
       else {
         str = vscp_str_format(("-;AUTH;%d;%s"), (int) WEBSOCK_ERROR_NOT_AUTHORISED, WEBSOCK_STR_ERROR_NOT_AUTHORISED);
         mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-        pSession->generateSid();                     // Generate new sid
+        pSession->generateSid();           // Generate new sid
         pSession->setAuthenticated(false); // not authenticated
       }
     }
@@ -3735,7 +3770,7 @@ CWebSockSrv::readEncryptionKey(const std::string &path)
 {
   // TODO Key is in session object
   try {
-    //uint8_t key[33];
+    // uint8_t key[33];
     std::ifstream in(path, std::ifstream::in);
     std::stringstream strStream;
     strStream << in.rdbuf();
@@ -3893,7 +3928,7 @@ websocksrv_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
       spdlog::debug("Serving static file request for {0} from web root {1}",
                     std::string(hm->uri.buf, hm->uri.len).c_str(),
                     pWebSockSrv->getWebRoot().c_str());
-      std::string webRoot = pWebSockSrv->getWebRoot();
+      std::string webRoot            = pWebSockSrv->getWebRoot();
       struct mg_http_serve_opts opts = { .root_dir = webRoot.c_str() };
       mg_http_serve_dir(conn, hm, &opts);
     }
