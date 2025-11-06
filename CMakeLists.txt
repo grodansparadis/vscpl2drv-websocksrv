@@ -30,7 +30,7 @@ cmake_minimum_required(VERSION 3.5)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/version.h" VERSION_H_CONTENT)
 
 # Extract version components using regex
-string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_VERSION[ \t]+([0-9]+)" _ ${VERSION_H_CONTENT})
+string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_MAJOR_VERSION[ \t]+([0-9]+)" _ ${VERSION_H_CONTENT})
 set(VERSION_MAJOR ${CMAKE_MATCH_1})
 
 string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION[ \t]+([0-9]+)" _ ${VERSION_H_CONTENT})
@@ -335,6 +335,7 @@ if (WIN32)
     OpenSSL::SSL OpenSSL::Crypto
     expat::expat
   )
+        
 else()
   target_link_libraries(${PROJECT_NAME} PRIVATE     
     m

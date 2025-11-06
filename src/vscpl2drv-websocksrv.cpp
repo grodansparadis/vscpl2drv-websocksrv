@@ -329,7 +329,7 @@ VSCPRead(long handle, vscpEvent *pEvent, unsigned long timeout)
 extern "C" unsigned long
 VSCPGetVersion(void)
 {
-  unsigned long ver = (MAKE_VSCPL2DRV_WEBSOCKSRV_VERSION(VSCPL2DRV_WEBSOCKSRV_VERSION,
+  unsigned long ver = (MAKE_VSCPL2DRV_WEBSOCKSRV_VERSION(VSCPL2DRV_WEBSOCKSRV_MAJOR_VERSION,
                                                          VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION,
                                                          VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION)
                        << 8) |
