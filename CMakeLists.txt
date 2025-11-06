@@ -335,7 +335,6 @@ if (WIN32)
     OpenSSL::SSL OpenSSL::Crypto
     expat::expat
   )
-        
 else()
   target_link_libraries(${PROJECT_NAME} PRIVATE     
     m
