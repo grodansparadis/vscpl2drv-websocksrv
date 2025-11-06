@@ -70,7 +70,7 @@ endif()
 
 # Expat C library
 if(WIN32)
-find_package(EXPAT REQUIRED)
+find_package(expat CONFIG REQUIRED)
 else()	
 include(FindEXPAT)
 find_package(EXPAT REQUIRED)
