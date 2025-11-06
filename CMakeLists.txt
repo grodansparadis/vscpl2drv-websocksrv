@@ -373,6 +373,6 @@ else()
           RUNTIME DESTINATION ${CMAKE_INSTALL_MANDIR}            
           RESOURCE DESTINATION ${CMAKE_INSTALL_FULL_}/var/lib/vscp/vscpd) 
   install(FILES ${CMAKE_SOURCE_DIR}/resources/linux/websocksrv.json
-            ${CMAKE_SOURCE_DIR}/resources/linux/users.json
+                ${CMAKE_SOURCE_DIR}/resources/linux/users.json
           DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/vscpl2drv-websocksrv/")         
 endif()

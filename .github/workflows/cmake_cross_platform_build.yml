@@ -37,7 +37,7 @@ jobs:
         cat "$VERSION_FILE"
         
         # Extract version components
-        VERSION_MAJOR=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_VERSION\s+([0-9]+).*/\1/')
+        VERSION_MAJOR=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_MAJOR_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_VERSION\s+([0-9]+).*/\1/')
         VERSION_MINOR=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION\s+([0-9]+).*/\1/')
         VERSION_PATCH=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION\s+([0-9]+).*/\1/')
         VERSION_BUILD=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION\s+([0-9]+).*/\1/')
