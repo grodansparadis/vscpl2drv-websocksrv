@@ -236,3 +236,6 @@ openssl x509 -req -in cert.csr -signkey /etc/vscp/certs/key.pem -out new_cert.pe
 ---
 
 This setup provides encrypted WebSocket connections for the VSCP driver while maintaining compatibility with the existing configuration structure.
+
+
+[filename](./bottom-copyright.md ':include')

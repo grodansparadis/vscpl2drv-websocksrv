@@ -1,33 +1,27 @@
 
-## Manual for the Accra module
+## Documentation for the vscpl2drv-websocksrv driver
 
 **Document version:** ${/var/document-version} - ${/var/creation-time}
 [HISTORY](./history.md)
 
 
-![Accra](/images/accra3.png)
+![driver model](/images/xmap-vscpl2drv-websocksrv.png)
 
-Accra is a module that have four counter channels that each can count
-pulses and measure frequency. Each channel can have alarms set for going
-over a counter level or when counting down to zero and for a frequency
-that goes outside of a specified frequency window.
+The websocket driver is a level II driver and act as a websocket server for the VSCP ws1 and ws2 websocket protocols. Users or IoT/m2m devices with different privileges and rights can connect to the exported interface and send/receive VSCP events. Typically this is a web based HMI or IoT/m2m device that uses the VSCP protocol to communicate. This makes it very easy to display data from the VSCP network in a web browser widget or graphical control panel.
 
-It has a built-in linear calculation algorithm that can translate pulse
-to real world measurement units. This can for example be used for
-utility meter measurements and gives the correct measurement value sent
-out on the VSCP bus.
+It is also possible to serve static web content with the driver. This can be used to serve a simple web based HMI.
 
-The module comes with a GUID and is programmed with a bootloader and
-VSCP module functionality that works right out of the box.
+The VSCP ws1 and ws2 websocket protocols are described [here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket).
 
-* [Repository for the module](https://github.com/grodansparadis/can4vscp-accra)
-  * This manual is available [here](https://grodansparadis.github.io/can4vscp-accra/)
-  * Latest schema for the module is available [here](https://github.com/grodansparadis/can4vscp-accra/tree/master/eagle)
-  * Latest firmware for the module is available [here](https://github.com/grodansparadis/can4vscp-accra/tree/master/firmware)
-  * [MDF for the module](https://github.com/grodansparadis/can4vscp-accra/tree/master/mdf)
+The level II driver is [described here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_driver_interfaces). With the simple interface API the VSCP level II driver uses (described above) it is also easy to use it with other software as a component.
+
+The connection can be secured with TLS/SSL as well as a simple user authentication mechanism.
+
+* [Repository for the module](https://github.com/grodansparadis/${/var/driver-name})
+* This manual is available [here](https://grodansparadis.github.io/${/var/driver-name})
 
 
-## VSCP
+## VSCP - the Very Simple Control Protocol (framework)
 
 ![VSCP logo](./images/logo_100.png)
 
@@ -35,22 +29,16 @@ VSCP is a free and open automation protocol for IoT and m2m devices. Visit [the 
 
 **VSCP is free.** Placed in the **public domain**. Free to use. Free to change. Free to do whatever you want to do with it. VSCP is not owned by anyone. VSCP will stay free and gratis forever.
 
-The specification for the VSCP protocol is [here](https://docs.vscp.org) 
+The specification for the VSCP protocol is [here](https://grodansparadis.github.io/vscp-doc-spec/#/) 
 
-VSCP documentation for various parts can be found [here](https://docs.vscp.org/).
+VSCP documentation for various parts of the protocol/framework can be found [here](https://docs.vscp.org/).
 
 If you use VSCP please consider contributing resources or time to the project ([https://github.com/sponsors/grodansparadis](https://github.com/sponsors/grodansparadis)).
 
-## Buy a module
-
-<img src="./images/grodan_logo.png" alt="Grodans PAradis AB" width="200"/>
-
-Ready made modules can be bought from [Grodans Paradis AB](https://www.grodansparadis.com).
 
 ## Document license
 
 This document is licensed under [Creative Commons BY 4.0](https://creativecommons.org/licenses/by/4.0/) and can be freely copied, redistributed, remixed, transformed, built upon as long as you give credits to the author.
-
 
 
 [filename](./bottom-copyright.md ':include')
