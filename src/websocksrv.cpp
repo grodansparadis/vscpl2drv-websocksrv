@@ -332,28 +332,15 @@ CWebSockSrv::CWebSockSrv(void)
 
   pthread_mutex_init(&m_mutex_UserList, NULL);
 
+  // Setting up logging defaults
+  m_consoleLogLevel = spdlog::level::debug;
+  m_fileLogLevel    = spdlog::level::debug;
+
   // Init pool
   spdlog::init_thread_pool(8192, 1);
 
   // Flush log every five seconds
   spdlog::flush_every(std::chrono::seconds(5));
-
-  auto console_start = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-  // Start out with level=info. Config may change this
-  console_start->set_level(spdlog::level::debug);
-  console_start->set_pattern("[vscpl2drv-websocksrv: %c] [%^%l%$] %v");
-
-  // Setting up logging defaults
-  m_logLevel = spdlog::level::debug;
-
-  m_bConsoleLogEnable = true;
-  m_consoleLogPattern = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
-
-  m_bEnableFileLog   = true;
-  m_fileLogPattern   = "[vscpl2drv-websocksrv %c] [%^%l%$] %v";
-  m_path_to_log_file = "/tmp/vscpl2drv-websocksrv.log";
-  m_max_log_size     = 5242880;
-  m_max_log_files    = 7;
 
   ////////////////////////////////////////////////////////
   //      Log files are configured in doLoadConfig      //
@@ -896,51 +883,6 @@ CWebSockSrv::doLoadConfig(std::string &path)
 
     json j = m_j_config["logging"];
 
-    // Logging: log-level for both console and file
-    if (j.contains("log-level")) {
-      std::string str;
-      try {
-        str = j["log-level"].get<std::string>();
-      }
-      catch (const std::exception &ex) {
-        spdlog::error("[vscpl2drv-websocksrv]Failed to read 'log-level' Error='{0}'", ex.what());
-      }
-      catch (...) {
-        spdlog::error("[vscpl2drv-websocksrv]Failed to read 'log-level' due to unknown error.");
-      }
-      vscp_makeLower(str);
-      if (std::string::npos != str.find("off")) {
-        m_logLevel = spdlog::level::off;
-      }
-      else if (std::string::npos != str.find("critical")) {
-        m_logLevel = spdlog::level::critical;
-      }
-      else if (std::string::npos != str.find("err")) {
-        m_logLevel = spdlog::level::err;
-      }
-      else if (std::string::npos != str.find("warn")) {
-        m_logLevel = spdlog::level::warn;
-      }
-      else if (std::string::npos != str.find("info")) {
-        m_logLevel = spdlog::level::info;
-      }
-      else if (std::string::npos != str.find("debug")) {
-        m_logLevel = spdlog::level::debug;
-      }
-      else if (std::string::npos != str.find("trace")) {
-        m_logLevel = spdlog::level::trace;
-      }
-      else {
-        spdlog::error("ReadConfig: LOGGING 'file-log-level' has invalid value "
-                      "[{}]. Default value used.",
-                      str);
-      }
-    }
-    else {
-      spdlog::error("ReadConfig: Failed to read LOGGING 'file-log-level' "
-                    "Defaults will be used.");
-    }
-
     // Logging: file-logging-enable
     if (j.contains("file-enable-log")) {
       try {
@@ -955,6 +897,51 @@ CWebSockSrv::doLoadConfig(std::string &path)
     }
     else {
       spdlog::debug("ReadConfig: Failed to read LOGGING 'file-enable-log' "
+                    "Defaults will be used.");
+    }
+
+    // Logging: log-level for  file
+    if (j.contains("file-log-level")) {
+      std::string str;
+      try {
+        str = j["file-log-level"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("[vscpl2drv-websocksrv]Failed to read 'file-log-level' Error='{0}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("[vscpl2drv-websocksrv]Failed to read 'file-log-level' due to unknown error.");
+      }
+      vscp_makeLower(str);
+      if (std::string::npos != str.find("off")) {
+        m_fileLogLevel = spdlog::level::off;
+      }
+      else if (std::string::npos != str.find("critical")) {
+        m_fileLogLevel = spdlog::level::critical;
+      }
+      else if (std::string::npos != str.find("err")) {
+        m_fileLogLevel = spdlog::level::err;
+      }
+      else if (std::string::npos != str.find("warn")) {
+        m_fileLogLevel = spdlog::level::warn;
+      }
+      else if (std::string::npos != str.find("info")) {
+        m_fileLogLevel = spdlog::level::info;
+      }
+      else if (std::string::npos != str.find("debug")) {
+        m_fileLogLevel = spdlog::level::debug;
+      }
+      else if (std::string::npos != str.find("trace")) {
+        m_fileLogLevel = spdlog::level::trace;
+      }
+      else {
+        spdlog::error("ReadConfig: LOGGING 'file-log-level' has invalid value "
+                      "[{}]. Default value used.",
+                      str);
+      }
+    }
+    else {
+      spdlog::error("ReadConfig: Failed to read LOGGING 'file-log-level' "
                     "Defaults will be used.");
     }
 
@@ -1045,6 +1032,51 @@ CWebSockSrv::doLoadConfig(std::string &path)
                     "Defaults will be used.");
     }
 
+    // Logging: log-level for  console
+    if (j.contains("console-log-level")) {
+      std::string str;
+      try {
+        str = j["console-log-level"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("[vscpl2drv-websocksrv]Failed to read 'console-log-level' Error='{0}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("[vscpl2drv-websocksrv]Failed to read 'console-log-level' due to unknown error.");
+      }
+      vscp_makeLower(str);
+      if (std::string::npos != str.find("off")) {
+        m_consoleLogLevel = spdlog::level::off;
+      }
+      else if (std::string::npos != str.find("critical")) {
+        m_consoleLogLevel = spdlog::level::critical;
+      }
+      else if (std::string::npos != str.find("err")) {
+        m_consoleLogLevel = spdlog::level::err;
+      }
+      else if (std::string::npos != str.find("warn")) {
+        m_consoleLogLevel = spdlog::level::warn;
+      }
+      else if (std::string::npos != str.find("info")) {
+        m_consoleLogLevel = spdlog::level::info;
+      }
+      else if (std::string::npos != str.find("debug")) {
+        m_consoleLogLevel = spdlog::level::debug;
+      }
+      else if (std::string::npos != str.find("trace")) {
+        m_consoleLogLevel = spdlog::level::trace;
+      }
+      else {
+        spdlog::error("ReadConfig: LOGGING 'console-log-level' has invalid value "
+                      "[{}]. Default value used.",
+                      str);
+      }
+    }
+    else {
+      spdlog::error("ReadConfig: Failed to read LOGGING 'file-log-level' "
+                    "Defaults will be used.");
+    }
+
     // Logging: console-pattern
     if (j.contains("console-pattern")) {
       try {
@@ -1075,7 +1107,7 @@ CWebSockSrv::doLoadConfig(std::string &path)
   auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
 
   if (m_bConsoleLogEnable) {
-    console_sink->set_level(m_logLevel);
+    console_sink->set_level(m_consoleLogLevel);
     console_sink->set_pattern(m_consoleLogPattern);
   }
   else {
@@ -1087,7 +1119,7 @@ CWebSockSrv::doLoadConfig(std::string &path)
     std::make_shared<spdlog::sinks::rotating_file_sink_mt>(m_path_to_log_file.c_str(), m_max_log_size, m_max_log_files);
 
   if (m_bEnableFileLog) {
-    rotating_file_sink->set_level(m_logLevel);
+    rotating_file_sink->set_level(m_fileLogLevel);
     rotating_file_sink->set_pattern(m_fileLogPattern);
   }
   else {
@@ -1104,9 +1136,16 @@ CWebSockSrv::doLoadConfig(std::string &path)
   spdlog::register_logger(logger);
   spdlog::set_default_logger(logger);
 
-  logger->set_level(m_logLevel);
+  // logger->set_level(m_logLevel);
 
-  spdlog::debug("Logger initialized.");
+  if (m_bDebug) {
+    spdlog::debug("trace.");
+    spdlog::debug("debug.");
+    spdlog::info("info.");
+    spdlog::warn("warn.");
+    spdlog::error("error.");
+    spdlog::critical("critical.");
+  }
 
   // ------------------------------------------------------------------------
 

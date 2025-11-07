@@ -99,16 +99,14 @@
         "xtree": "cpp",
         "xutility": "cpp"
     },
-    "cmake.configureSettings": {
-        "VCPKG_TARGET_TRIPLET" : "x64-windows",
-        "CMAKE_BUILD_TYPE" : "${buildType}"
-    },
-    "cmake.generator": "Visual Studio 17 2022",
+    "cmake.useCMakePresets": "always",
+    "cmake.configureOnOpen": false,
     "cSpell.language": "sv,en",
     "C_Cpp.vcpkg.enabled": false,
     "cmake.cmakePath": "cmake",
-    "C_Cpp.default.cppStandard": "",
-    "C_Cpp.default.cStandard": "",
+    "C_Cpp.default.cppStandard": "c++20",
+    "C_Cpp.default.cStandard": "c17",
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
     "sarif-viewer.connectToGithubCodeScanning": "off",
     "cSpell.words": [
       "authorised",
