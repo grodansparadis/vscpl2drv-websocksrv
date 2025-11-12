@@ -99,6 +99,7 @@ SET(CPACK_PACKAGE_DESCRIPTION "VSCP driver for tcp/ip server")
 SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "VSCP level II Driver for VSCP that export a server interface for the VSCP tcp/ip link protocol")
 SET(CPACK_PACKAGE_VENDOR "the VSCP Project")
 SET(CPACK_PACKAGE_CONTACT "akhe@vscp.org")
+SET(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 
 if(NOT DEFINED APP_LOW_NAME)
   set(APP_LOW_NAME "vscpl2drv-websocksrv")
