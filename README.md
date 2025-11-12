@@ -17,11 +17,11 @@ The websocket driver is a level II driver and act as a websocket server for the 
 It is also possible to serve static web content with the driver. This can be used to serve a simple web based HMI.
 
 * Documentation is available [here](https://grodansparadis.github.io/vscpl2drv-websocksrv)
-* [Repository for the module](https://github.com/grodansparadis/vscpl2drv-websocksrv)
+* Repository for the module is [here](https://github.com/grodansparadis/vscpl2drv-websocksrv)
 
 The VSCP ws1 and ws2 websocket protocols are described [here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket).
 
-The level II driver is [described here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_driver_interfaces). With the simple interface API the VSCP level II driver uses (described above) it is also easy to use it with other software as a component.
+The level II driver API is [described here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_driver_interfaces). With the simple interface API the VSCP level II driver uses (described above) it is also easy to use it with other software as a component.
 
 The connection can be secured with TLS/SSL as well as a simple user authentication mechanism.
 
