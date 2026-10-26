@@ -4,7 +4,7 @@
 //
 // The MIT License (MIT)
 //
-// Copyright © 2000-2025 Ake Hedman, Grodans Paradis AB
+// Copyright © 2000-2026 Ake Hedman, Grodans Paradis AB
 // <info@grodansparadis.com>
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -52,11 +52,13 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+
 #if WIN32
 #else
 #include <syslog.h>
 #include <unistd.h>
 #endif
+
 #include <time.h>
 
 #include <userlist.h>
@@ -76,7 +78,7 @@ using json = nlohmann::json;
 // Maximum number of events in a client queue
 const uint16_t MAX_ITEMS_IN_QUEUE = 32000;
 
-#define DRIVER_COPYRIGHT "Copyright © 2000-2025 Ake Hedman, the VSCP Project, https://www.vscp.org"
+#define DRIVER_COPYRIGHT "Copyright © 2000-2026 Ake Hedman, the VSCP Project, https://www.vscp.org"
 
 // for convenience
 using json = nlohmann::json;
@@ -517,6 +519,9 @@ public:
   std::string getWebRoot(void) const { return m_web_root; }
   void setWebRoot(const std::string &web_root) { m_web_root = web_root; }
 
+  std::string getCaPath(void) const { return m_ca_path; }
+  void setCaPath(const std::string &ca_path) { m_ca_path = ca_path; }
+  
   std::string getCertPath(void) const { return m_cert_path; }
   void setCertPath(const std::string &cert_path) { m_cert_path = cert_path; }
 
@@ -822,12 +827,12 @@ public:
   //                      Logging
   /////////////////////////////////////////////////////////
 
-  bool m_bEnableFileLog;                    // True to enable logging
-  spdlog::level::level_enum m_fileLogLevel; // log level
-  std::string m_fileLogPattern;             // log file pattern
-  std::string m_path_to_log_file;           // Path to logfile
-  uint32_t m_max_log_size;                  // Max size for logfile before rotating occurs
-  uint16_t m_max_log_files;                 // Max log files to keep
+  bool m_bEnableFileLog;                       // True to enable logging
+  spdlog::level::level_enum m_fileLogLevel;    // log level
+  std::string m_fileLogPattern;                // log file pattern
+  std::string m_path_to_log_file;              // Path to logfile
+  uint32_t m_max_log_size;                     // Max size for logfile before rotating occurs
+  uint16_t m_max_log_files;                    // Max log files to keep
   bool m_bConsoleLogEnable;                    // True to enable logging to console
   spdlog::level::level_enum m_consoleLogLevel; // log level
   std::string m_consoleLogPattern;             // Console log pattern
@@ -837,19 +842,19 @@ public:
   bool m_bQuit; // Flag to indicate if the server should quit
   cguid m_guid; // Driver GUID
 
-  #ifdef WIN32
-  HANDLE m_semReceiveQueue;               // Semaphore for receive queue
-  #else
-  sem_t m_semReceiveQueue;               // Semaphore for receive queue
-  #endif
+#ifdef WIN32
+  HANDLE m_semReceiveQueue; // Semaphore for receive queue
+#else
+  sem_t m_semReceiveQueue; // Semaphore for receive queue
+#endif
   pthread_mutex_t m_mutexReceiveQueue;   // Mutex for receive queue
   std::list<vscpEvent *> m_receiveQueue; // Receive queue
 
-  #ifdef WIN32
-  HANDLE m_semSendQueue;               // Semaphore for send queue
-  #else
-  sem_t m_semSendQueue;               // Semaphore for send queue
-  #endif
+#ifdef WIN32
+  HANDLE m_semSendQueue; // Semaphore for send queue
+#else
+  sem_t m_semSendQueue; // Semaphore for send queue
+#endif
   pthread_mutex_t m_mutexSendQueue;   // Mutex for send queue
   std::list<vscpEvent *> m_sendQueue; // Send queue
 
@@ -893,6 +898,9 @@ private:
 
   // TSL certificate path for the websocket server
   std::string m_cert_path;
+
+  // TSL ca path for the websocket server
+  std::string m_ca_path;
 
   // TSL key path for the websocket server
   std::string m_key_path;

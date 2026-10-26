@@ -4,7 +4,7 @@
 //
 // The MIT License (MIT)
 //
-// Copyright © 2000-2025 Ake Hedman, Grodans Paradis AB
+// Copyright © 2000-2026 Ake Hedman, Grodans Paradis AB
 // <info@grodansparadis.com>
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -222,7 +222,7 @@ CWebSockSession::addToInputQueue(const vscpEvent *pEvent)
   // Add event to input queue
   m_inputQueue.push_back(pEventCopy);
 
-  // Post semaphore
+  // Event in input queue - signal waiting thread
 #ifdef WIN32
   ReleaseSemaphore(m_semInputQueue, 1, NULL);
 #else
@@ -1745,14 +1745,6 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strContent,
   tokens.pop_front();
   vscp_trim(strPassword);
 
-  // Check if user is valid
-  CUserItem *pUserItem = m_userList.getUser(strUser);
-  if (NULL == pUserItem) {
-    spdlog::error("[Websocket Client] Authentication: CUserItem "
-                  "allocation problem ");
-    return false;
-  }
-
   char addrbuf[64];
   if (conn->rem.is_ip6) {
     mg_snprintf(addrbuf, sizeof(addrbuf), "%M", mg_print_ip6, "abcdefghijklmnop");
@@ -1761,16 +1753,19 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strContent,
     mg_snprintf(addrbuf, sizeof(addrbuf), "%M", mg_print_ip4, "abcd");
   }
 
-  if (!pUserItem->validateUser(strPassword)) {
-    spdlog::error("[Websocket Client] Authentication: User {0} at host "
-                  "[{1}] gave wrong password.",
+  // validateUser verifies the plaintext password against the stored Argon2id
+  // hash using libsodium.
+  CUserItemPtr pUserItem = m_userList.validateUser(strUser, strPassword);
+  if (!pUserItem) {
+    spdlog::error("[Websocket Client] Authentication: Invalid credentials "
+                  "for user {0} at host [{1}].",
                   (const char *) strUser.c_str(),
                   addrbuf);
     return false;
   }
 
   // Check if remote ip is valid
-  bValidHost = pUserItem->isAllowedToConnect(conn->rem.ip4);
+  bValidHost = pUserItem->isAllowedToConnect(conn->rem.addr.ip4);
 
   if (!bValidHost) {
     // Log valid login
@@ -1783,7 +1778,7 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strContent,
   pSession->setAuthenticated(true);
 
   // Add user to client
-  pSession->setUserItem(pUserItem);
+  pSession->setUserItem(pUserItem.get());
 
   // Set user filter
   pSession->setFilter(pUserItem->getUserFilter());

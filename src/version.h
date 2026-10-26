@@ -2,7 +2,7 @@
 //
 // The MIT License (MIT)
 //
-// Copyright (C) 2000-2025 Ake Hedman, the VSCP project
+// Copyright (C) 2000-2026 Ake Hedman, the VSCP project
 // <info@vscp.org>
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -25,25 +25,25 @@
 #ifndef _____VSCPL2DRV_WEBSOCKSRV_VERSION_h_____
 #define _____VSCPL2DRV_WEBSOCKSRV_VERSION_h_____
 /*
-    MAJOR version with incompatible API changes,
-    MINOR version with add functionality in a backwards-compatible manner, and
-    RELEASE version with backwards-compatible bug fixes.
-    BUILD Just a new build.
+    YEAR is the release year,
+    MONTH is the release month,
+    RELEASE is the patch number.
+    BUILD identifies a build of that release.
 */
 // I M P O T A N T ! ! ! Lines below must be located at line
 // 35/36/37/38/40/42/43 I M P O T A N T ! ! !
-#define VSCPL2DRV_WEBSOCKSRV_MAJOR_VERSION     15
-#define VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION     2
+#define VSCPL2DRV_WEBSOCKSRV_MAJOR_VERSION     2026
+#define VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION     10
 #define VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION   0
 #define VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION     0
 
-#define VSCPL2DRV_WEBSOCKSRV_DISPLAY_VERSION   "15.2.0-0"
+#define VSCPL2DRV_WEBSOCKSRV_DISPLAY_VERSION   "2026.10.0"
 
 #define VSCPL2DRV_WEBSOCKSRV_COPYRIGHT                                      \
-    "Copyright (C) 2000-2025 Ake Hedman, the VSCP project, "                \
+    "Copyright (C) 2000-2026 Ake Hedman, the VSCP project, "                \
     "https://www.vscp.org"
 #define VSCPL2DRV_WEBSOCKSRV_COPYRIGHT_HTML                                 \
-    "Copyright (C) 2000-2025 Ake Hedman, <a "                               \
+    "Copyright (C) 2000-2026 Ake Hedman, <a "                               \
     "href=\"mailto:info@vscp.org\">the VSCP project</a>, <a "               \
     "href=\"https://www.vscp.org\">https://"                                \
     "www.grodansparadis.com</a>"
@@ -51,4 +51,3 @@
 #define MAKE_VSCPL2DRV_WEBSOCKSRV_VERSION(major, minor, release)            \
     (((major) << 16) | ((minor) << 8) | (release))
 #endif
-

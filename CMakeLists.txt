@@ -2,7 +2,7 @@
 #
 # Build instructions for VSCP Works.
 #
-# Copyright (c) 2000-2025 Åke Hedman, the VSCP Project
+# Copyright (c) 2000-2025 Åke Hedman and contributors, the VSCP Project
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -122,9 +122,6 @@ if(NOT DEFINED WIN32)
   add_subdirectory(man)
 endif()
 
-# Test application
-add_subdirectory(testapp)
-
 option(USE_SSL "Use SSL" TRUE)
 
 ## --- C++20 build flags ---
@@ -148,13 +145,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # --- System Libraries ---
 include(GNUInstallDirs)
 
-# --- Path to vscp --- 
-if (NOT DEFINED VSCP_PATH)
-  set (VSCP_PATH "${PROJECT_SOURCE_DIR}/../vscp")
-endif()
-
 if(WIN32)
-    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+  add_definitions(-D_CRT_SECURE_NO_WARNINGS)
   add_definitions(-DWIN32_LEAN_AND_MEANS)
   add_definitions(-DOPENSSL_API_1_1)
   add_definitions(-D_POSIX_C_SOURCE)    
@@ -228,6 +220,100 @@ ENDIF(EXISTS "${CMAKE_ROOT}/Modules/CPack.cmake")
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
+
+include(FetchContent)
+
+set(VSCP_FETCH_CONTENT_OPTIONS)
+if(NOT CMAKE_VERSION VERSION_LESS "3.18")
+  list(APPEND VSCP_FETCH_CONTENT_OPTIONS SOURCE_SUBDIR "__vscp_sources_only__")
+endif()
+if(NOT CMAKE_VERSION VERSION_LESS "3.24")
+  list(APPEND VSCP_FETCH_CONTENT_OPTIONS DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+endif()
+
+FetchContent_Declare(
+  vscp
+  # Only a handful of VSCP source files are compiled directly into vscpd, so
+  # there is no need to clone the repository. A pinned source tarball avoids
+  # fetching ~1.2GB of git history plus ~400MB of submodules that this project
+  # never uses.
+  # Get URL_HASH
+  # curl -sL https://codeload.github.com/grodansparadis/vscp/tar.gz/<commit> | sha256sum
+  URL https://codeload.github.com/grodansparadis/vscp/tar.gz/911239f8fc7a5f084fe3435c6c7f2ee31e9f4c90
+  URL_HASH SHA256=a5e1c8154f22139082f857901343580dd510b8fc58c7cfb9d23d6e269cca24fa
+  ${VSCP_FETCH_CONTENT_OPTIONS}
+)
+# Make the VSCP sources available without adding its standalone library targets
+# to this build. The daemon compiles only the VSCP source files listed below.
+if(CMAKE_VERSION VERSION_LESS "3.18")
+  FetchContent_GetProperties(vscp)
+  if(NOT vscp_POPULATED)
+    FetchContent_Populate(vscp)
+  endif()
+else()
+  FetchContent_MakeAvailable(vscp)
+endif()
+
+FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG v1.17.0
+)
+FetchContent_MakeAvailable(spdlog)
+
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.12.0
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
+FetchContent_Declare(
+    mongoose
+    GIT_REPOSITORY https://github.com/cesanta/mongoose.git
+    GIT_TAG 7.23
+)
+FetchContent_MakeAvailable(mongoose)
+
+find_package(OpenSSL REQUIRED)
+find_library(SODIUM_LIBRARY NAMES sodium)
+if(NOT SODIUM_LIBRARY)
+  message(FATAL_ERROR "libsodium is required for Argon2id user authentication")
+endif()
+
+set(VSCP_COMMON_SOURCES
+  ${vscp_SOURCE_DIR}/src/vscp/common/guid.cpp
+  ${vscp_SOURCE_DIR}/src/vscp/common/vscpdatetime.cpp
+  ${vscp_SOURCE_DIR}/src/vscp/common/vscphelper.cpp
+  ${vscp_SOURCE_DIR}/src/common/vscphelper-common.cpp
+  ${vscp_SOURCE_DIR}/src/common/vscpbase64.c
+  ${vscp_SOURCE_DIR}/src/common/vscp-aes.c
+  ${vscp_SOURCE_DIR}/src/common/crc.c
+  ${vscp_SOURCE_DIR}/src/common/crc8.c
+  ${vscp_SOURCE_DIR}/src/common/vscpmd5.c
+)
+
+add_library(vscp-common STATIC ${VSCP_COMMON_SOURCES})
+target_include_directories(vscp-common PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${vscp_SOURCE_DIR}/src/vscp/common
+  ${vscp_SOURCE_DIR}/src/common
+)
+if(WIN32)
+  target_include_directories(vscp-common PUBLIC
+    ${vscp_SOURCE_DIR}/src/common/windows
+    ${vscp_SOURCE_DIR}/src/vscp/common/win32helpers
+  )
+endif()
+target_link_libraries(vscp-common PUBLIC
+  spdlog::spdlog_header_only
+  nlohmann_json::nlohmann_json
+  OpenSSL::Crypto
+)
+
+# Test application
+add_subdirectory(testapp)
+
 # Threading support - cross-platform
 if(WIN32)
     # On Windows, use PThreads4W
@@ -241,10 +327,6 @@ else()
     set(THREAD_LIBRARIES Threads::Threads)
 endif()
 
-#openssl
-find_package(OpenSSL REQUIRED)
-
-
 # Expat C library
 if(WIN32)
 find_package(expat CONFIG REQUIRED)
@@ -254,86 +336,46 @@ find_package(EXPAT REQUIRED)
 include_directories(${EXPAT_INCLUDE_DIRS})
 endif()
 
-set(RESOURCE_FILES
-        README.md
-        forms/index.html)
-
-# Add files to library
+# Add application sources to library
 add_library(${PROJECT_NAME}
   ./src/vscpl2drv-websocksrv.cpp
-  ./src/websocksrv.cpp 
-  ./third_party/vscp/src/vscp/common/userlist.h
-  ./third_party/vscp/src/vscp/common/userlist.cpp
-  ./third_party/mongoose/mongoose.c
-  ./third_party/mongoose/mongoose.h
-  ./third_party/Mustache/mustache.hpp
-  ./third_party/spdlog/include
-  ./third_party/vscp/src/vscp/common/vscp.h
-  ./third_party/vscp/src/vscp/common/vscpdatetime.h
-  ./third_party/vscp/src/vscp/common/vscpdatetime.cpp
-  ./third_party/vscp/src/vscp/common/guid.h
-  ./third_party/vscp/src/vscp/common/guid.cpp
-  ./third_party/vscp/src/vscp/common/vscphelper.h
-  ./third_party/vscp/src/vscp/common/vscphelper.cpp
-  ./third_party/vscp/src/vscp/common/canal.h
-  ./third_party/vscp/src/common/vscpbase64.h
-  ./third_party/vscp/src/common/vscpbase64.c
-  ./third_party/vscp/src/common/vscp-aes.h
-  ./third_party/vscp/src/common/vscp-aes.c
-  ./third_party/vscp/src/common/crc.h
-  ./third_party/vscp/src/common/crc.c
-  ./third_party/vscp/src/common/crc8.h
-  ./third_party/vscp/src/common/crc8.c
-  ./third_party/vscp/src/common/vscpmd5.h
-  ./third_party/vscp/src/common/vscpmd5.c
-  ./third_party/crypto-algorithms/sha256.h
-  ./third_party/crypto-algorithms/sha256.c
-) 
+  ./src/websocksrv.cpp
+  ./src/userlist.cpp
+  ${mongoose_SOURCE_DIR}/mongoose.c
+)
 
 # NOW add the compile definitions AFTER the target is created
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     PROJECT_VERSION_MAJOR=${VERSION_MAJOR}
     PROJECT_VERSION_MINOR=${VERSION_MINOR}
     PROJECT_VERSION_PATCH=${VERSION_PATCH}
-    PROJECT_VERSION_BUILD=${VERSION_BUILD}
     PROJECT_VERSION="${PROJECT_VERSION}"
 )
 
-# Add the generated version header to target include directories
-target_include_directories(${PROJECT_NAME} PRIVATE
-    ${CMAKE_CURRENT_BINARY_DIR}
-)
-
 if (WIN32)
-    
   find_package(PThreads4W REQUIRED)
   find_path(PTHREAD_INCLUDE_DIR pthread.h)
 
-  include_directories( PUBLIC src/
-    ./third_party/vscp/src/vscp/common/  
-    ./third_party/vscp/src/common/
-    ./third_party/mongoose/
-    ./third_party/json/single_include/
-    ./third_party/Mustache/
-    ./third_party/spdlog/include/
+  target_include_directories(${PROJECT_NAME} PRIVATE
     ${PTHREAD_INCLUDE_DIR}
     ${CMAKE_BINARY_DIR}
     ${OPENSSL_INCLUDE_DIR}
+    "${mongoose_SOURCE_DIR}"
     ${LOCAL_WIN_INCLUDE}
- )
+  )
 else()
-  include_directories( PUBLIC src/
-    ./third_party/vscp/src/vscp/common/
-    ./third_party/vscp/src/common
-    ./third_party/mongoose/
-    ./third_party/json/single_include/
-    ./third_party/Mustache/
-    ./third_party/spdlog/include/
-    ./third_party/crypto-algorithms/
+  target_include_directories(${PROJECT_NAME} PRIVATE
+    "${mongoose_SOURCE_DIR}"
     ${CMAKE_BINARY_DIR}
-    ${OPENSSL_INCLUDE_DIR}
-    ${LOCAL_SYSLOG_INCLUDE} )
- endif()   
+  )
+endif()
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    USE_IPV6
+    USE_WEBSOCKET
+    USE_SERVER_STATS
+)
+
 
 if (WIN32)
   target_link_libraries(${PROJECT_NAME} PRIVATE     
@@ -341,7 +383,8 @@ if (WIN32)
     OpenSSL::SSL 
     OpenSSL::Crypto
     OpenSSL::SSL OpenSSL::Crypto
-    expat::expat
+    vscp-common
+    ${SODIUM_LIBRARY}
   )
         
 else()
@@ -351,7 +394,8 @@ else()
     ${THREAD_LIBRARIES}
     OpenSSL::SSL 
     OpenSSL::Crypto
-    ${EXPAT_LIBRARIES}
+    vscp-common
+    ${SODIUM_LIBRARY}
   )
 endif()
 

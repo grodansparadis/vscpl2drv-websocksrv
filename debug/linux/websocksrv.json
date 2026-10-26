@@ -3,16 +3,15 @@
   "write" : false,
   "enable-ws1" : true,
   "enable-ws2" : true,
-  "enable-static" : true,
+  "enable-static" : false,
   "url-ws1" : "/ws1",
   "url-ws2" : "/ws2",
   "web-root" : "/tmp/www",
   "max-clients" : 100,
-  "key-file" : "/etc/vscp/vscp.key",
   "interface" : "ws://localhost:8884",
   "rx-filter" : "0,0,0,-,0,0,0,-",
   "max-client-queue-size" : 32000,
-  "path-users" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/users.json",
+  "path-users" : "debug/users.json",
   "tls" : {
     "ca" : "/etc/vscp/certs/ca.pem",
     "cert" : "/etc/vscp/certs/cert.pem",
@@ -30,4 +29,3 @@
     "console-pattern" : "[console vcpl2drv-websocksrv %c] [%^%l%$] %v"
   }
 }
-

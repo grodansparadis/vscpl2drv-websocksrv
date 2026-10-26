@@ -2,7 +2,7 @@
 	"users" : [
 		{
 			"name" : "admin",
-			"password" : "2d1e4f91dae49cd08eaba2293e422273",
+			"password" : "$argon2id$v=19$m=65536,t=2,p=1$m1RjLRFFn+qCWNm1tfXdyA$LxOtPSxcf92Sc74fK1yde35XXGXWI66QRWVi/csFa7o",
 			"fullname" : "Miss. Super user",
 			"rights" : "admin",
 			"remotes" : [
@@ -16,7 +16,7 @@
 		},
 		{
 			"name" : "user",
-			"password" : "8c3088f1b27432344f14d82033749797",
+			"password" : "$argon2id$v=19$m=65536,t=2,p=1$m1RjLRFFn+qCWNm1tfXdyA$LxOtPSxcf92Sc74fK1yde35XXGXWI66QRWVi/csFa7o",
 			"fullname" : "Mr. Sample user",
 			"rights" : "user",
 			"remotes" : "",
@@ -27,7 +27,7 @@
 		},
 		{
 			"name" : "special1",
-			"password" : "52af526e3b91fbf9fe1f9447808b0902",
+			"password" : "$argon2id$v=19$m=65536,t=2,p=1$m1RjLRFFn+qCWNm1tfXdyA$LxOtPSxcf92Sc74fK1yde35XXGXWI66QRWVi/csFa7o",
 			"fullname" : "Mrs. Special user",
 			"rights" : [
 				"user",
@@ -47,7 +47,7 @@
 		},
     {
 			"name" : "vscp",
-			"password" : "8c92432a556d8dc0b97e9c34fc79725e",
+			"password" : "$argon2id$v=19$m=65536,t=2,p=1$m1RjLRFFn+qCWNm1tfXdyA$LxOtPSxcf92Sc74fK1yde35XXGXWI66QRWVi/csFa7o",
 			"fullname" : "VSCP standard user",
 			"rights" : "user",
 			"remotes" : "",

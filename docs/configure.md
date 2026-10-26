@@ -270,101 +270,67 @@ The default filter/mask pair means that all events are received by the driver.
 
 ## Format for the user database
 
- The user database is separated from the driver configuration file due to security reasons. It should be places in a file that is only readable by the _vscp_ user, the user the VSCP daemon us run under. 
- 
- A good location for the file is _/etc/vscp/users.json_  Set user and group to _vscp_ and rights to 0x700.
-
- The installation script install a sample user file to _/usr/share/vscpl2drv-websocksrv/_. This file can be used as a starting point for your own setup. It defines two users. _admin_ and _user_ both with password _secret_.
-
- The user configuration file is on JSON format and looks like this.
-
- ```json
- {
-  "users" : [
-    {
-      "user" : "admin",
-      "fullname" : "Full name",
-      "note" : "note about user-item",
-      "credentials"  : "hash over 'user:password'",
-      "filter" : "outgoing filter",
-      "rights" : "comma separated list of rights",
-      "remotes" : "comma separated list of hosts. First char: '+' = allow '-' = deny",
-      "events" : "comma separated list of events where each item is specified as [TX|RX|BOTH;vscp-class;vscp.type;priority]"
-    }
-  ]
-}
-```
-
-Any number of users can be specified
-
-### user
-The login user name
-
-### password
-Hash calculated over "user:password" stored as md5 hash on hexadecimal format. On a Linux system you can generate this hash for a given username/password with
-
-```bash
-echo -n user:password | md5sum
-```
-
-With the VSCP daemon is a script **vscp-mkpassword** installed that can be used to generate passwords.
-
-### rights
-Rights for this user as a 32-bit rights number.
-
-### name
-Full name for user.
-
-### events
-This is a list with events the user is allowed to send and/or receive. If empty all events can be sent and received by the users.
-
- ### class
- VSCP class. Can be set to -1 to allow all classes.
-
- ### type
- VSCP type. Can be set to -1 to allow all types. 
-
- ### dir
- The direction the user is allowed to handle. Set to "rx" to allow only receive. Set to "tx" to allow only transmit. Set to "both" or empty to allow sending and receiving.
-
-### max-priority
-Max priority (0-7) this user can use for send events. Trying to send an event with a higher priority will replace the event value with the value set here. Note that 0 is the highest priority.
+The user database is a JSON file separate from the driver configuration. Store
+it in a location readable only by the account running the driver, such as
+`/etc/vscp/users.json`. See the [user file format](#user-file-format) below for
+the schema and example.
 
 ---
 
-The _users.json_ file looks like this
+## User file format :id=user-file-format
+
+The file named by `path-users` must be a JSON object containing a `users` array.
+Each entry requires a non-empty `name` and `password`. The password value must
+be an Argon2id password hash; do not store a plaintext password. The other
+fields are optional:
+
+* `fullname` and `note` are strings.
+* `rights` is an array of right names, or a string with names separated by
+  `/`. Names include `admin`, `user`, `driver`, `send-events`, and
+  `receive-events`.
+* `remotes` is a string or an array of remote address rules. Prefix each rule
+  with `+` to allow or `-` to deny.
+* `events` is a string or an array of allowed event class/type pairs, such as
+  `10:*` or `30:9`. An empty value leaves the event list unrestricted.
+* `filter` and `mask` are VSCP filter and mask strings.
+
+`remotes` and `events` may use either a JSON array of strings or a
+comma-delimited string.
 
 ```json
 {
   "users" : [
     {
       "name" : "admin",
-      "password" : "487636FDE3637C7C853AAC9EAF6FA062;357C71CA59F760C08C4125C444A22A91FD1FE1FB0E5628771A572BAF6F61B71F",
-      "fullname" : "Miss. Super User",
+      "password" : "$argon2id$v=19$m=65536,t=2,p=1$<salt>$<hash>",
+      "fullname" : "Administrator",
       "rights" : "admin",
       "remotes" : [
         "+127.0.0.0/24",
-        "+192.168.0.0/16"                
+        "+192.168.0.0/16"
       ],
       "events" : "",
       "filter" : "",
       "mask" : "",
-      "note" : "A normal user. username='admin' password='secret'"
+      "note" : "Administrative account"
     },
     {
       "name" : "user",
-      "password" : "0839DD1BE692164847B601E6520CE23B;3E1B4D950F04EA3BFA2C43160B9D98ECC76B249F79A1062F041C526978591BA3",
-      "fullname" : "Mr. Sample User",
-      "rights" : "user",
-      "remotes" : "",
-      "events" : "",
+      "password" : "$argon2id$v=19$m=65536,t=2,p=1$<salt>$<hash>",
+      "fullname" : "Sample User",
+      "rights" : ["user", "send-events"],
+      "remotes" : [],
+      "events" : ["10:*", "30:9"],
       "filter" : "",
-      "mask" : "",						
-      "note" : "A normal user. username='user' password='secret'"
+      "mask" : "",
+      "note" : "Sample account"
     }
   ]
 }
 ```
+
+Replace each password placeholder with a valid Argon2id hash before using the
+file. Keep the file readable only by the account running the driver.
 
 ## Windows
 See information from Linux. The only difference is the disk location from where configuration data is fetched.
