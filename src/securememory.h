@@ -25,7 +25,7 @@ public:
     if (initialized < 0) {
       throw std::runtime_error("Unable to initialize libsodium secure memory");
     }
-    if (count > std::numeric_limits<size_t>::max() / sizeof(T)) {
+    if (count > (std::numeric_limits<size_t>::max)() / sizeof(T)) {
       throw std::bad_array_new_length();
     }
     const size_t bytes = count * sizeof(T);
