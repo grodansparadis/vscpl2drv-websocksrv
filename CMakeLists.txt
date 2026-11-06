@@ -259,7 +259,8 @@ FetchContent_MakeAvailable(mongoose)
 
 find_package(OpenSSL REQUIRED)
 find_library(SODIUM_LIBRARY NAMES sodium)
-if(NOT SODIUM_LIBRARY)
+find_path(SODIUM_INCLUDE_DIR NAMES sodium.h)
+if(NOT SODIUM_LIBRARY OR NOT SODIUM_INCLUDE_DIR)
   message(FATAL_ERROR "libsodium is required for Argon2id user authentication")
 endif()
 
@@ -359,6 +360,8 @@ else()
   )
 endif()
 
+target_include_directories(${PROJECT_NAME} PRIVATE "${SODIUM_INCLUDE_DIR}")
+
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     USE_IPV6
     USE_WEBSOCKET
@@ -391,6 +394,7 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
   add_executable(test-securememory test/test_securememory.cpp src/userlist.cpp)
+  target_include_directories(test-securememory PRIVATE "${SODIUM_INCLUDE_DIR}")
   target_link_libraries(test-securememory PRIVATE vscp-common ${SODIUM_LIBRARY} ${THREAD_LIBRARIES})
   if(WIN32)
     target_link_libraries(test-securememory PRIVATE expat::expat ws2_32)
