@@ -2,26 +2,12 @@
 #
 # Build instructions for VSCP Works.
 #
-# Copyright (c) 2000-2025 Åke Hedman and contributors, the VSCP Project
+# Copyright (c) 2000-2026 Åke Hedman and contributors, the VSCP Project
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-# 
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-# 
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# SPDX-License-Identifier: GPL-2.0-only
 #
+# This file is distributed under the GNU General Public License, version 2.
+# See LICENSE for the complete license text.
 #
 
 cmake_minimum_required(VERSION 3.5)
@@ -235,8 +221,8 @@ FetchContent_Declare(
   # never uses.
   # Get URL_HASH
   # curl -sL https://codeload.github.com/grodansparadis/vscp/tar.gz/<commit> | sha256sum
-  URL https://codeload.github.com/grodansparadis/vscp/tar.gz/911239f8fc7a5f084fe3435c6c7f2ee31e9f4c90
-  URL_HASH SHA256=a5e1c8154f22139082f857901343580dd510b8fc58c7cfb9d23d6e269cca24fa
+  URL https://codeload.github.com/grodansparadis/vscp/tar.gz/898fcc1ce6a89b5f4b2b8a3a233cad663dcd278f
+  URL_HASH SHA256=5485966dab085bab3ce4fb815de0a4bc8056cf11afc35b1531cc9cb8bcec6b16 
   ${VSCP_FETCH_CONTENT_OPTIONS}
 )
 # Make the VSCP sources available without adding its standalone library targets
@@ -281,6 +267,8 @@ set(VSCP_COMMON_SOURCES
   ${vscp_SOURCE_DIR}/src/vscp/common/guid.cpp
   ${vscp_SOURCE_DIR}/src/vscp/common/vscpdatetime.cpp
   ${vscp_SOURCE_DIR}/src/vscp/common/vscphelper.cpp
+  ${vscp_SOURCE_DIR}/src/vscp/common/vscphelperlogging.cpp
+  ${vscp_SOURCE_DIR}/src/vscp/common/vscphelperlogging-forward.cpp
   ${vscp_SOURCE_DIR}/src/common/vscphelper-common.cpp
   ${vscp_SOURCE_DIR}/src/common/vscpbase64.c
   ${vscp_SOURCE_DIR}/src/common/vscp-aes.c
@@ -296,10 +284,15 @@ target_include_directories(vscp-common PUBLIC
   ${vscp_SOURCE_DIR}/src/common
 )
 if(WIN32)
+  target_compile_definitions(vscp-common PRIVATE
+    VSCP_HELPER_LOGGING_EXPORTS
+    VSCP_HELPER_LOGGING_BACKEND_EXPORTS
+  )
   target_include_directories(vscp-common PUBLIC
     ${vscp_SOURCE_DIR}/src/common/windows
     ${vscp_SOURCE_DIR}/src/vscp/common/win32helpers
   )
+  target_link_libraries(vscp-common PUBLIC ws2_32)
 endif()
 target_link_libraries(vscp-common PUBLIC
   spdlog::spdlog_header_only

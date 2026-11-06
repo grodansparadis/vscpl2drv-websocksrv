@@ -1,3 +1,7 @@
+CMake fetches the VSCP sources and compiles the required helpers, including
+their logging backend and API forwarder, into `vscp-common`. A separate VSCP
+library installation is not required.
+
 ## Build from source on Linux
 
 ```bash

@@ -1,5 +1,13 @@
 # vscpl2drv-websocksrv
 
+[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](./LICENSE)
+[![Cross-platform build](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/cmake_cross_platform_build.yml/badge.svg)](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/cmake_cross_platform_build.yml)
+![Linux supported](https://img.shields.io/badge/Linux-supported-brightgreen?logo=linux)
+![Windows supported](https://img.shields.io/badge/Windows-supported-brightgreen?logo=windows)
+![macOS supported](https://img.shields.io/badge/macOS-supported-brightgreen?logo=apple)
+![Raspberry Pi 32-bit supported](https://img.shields.io/badge/Raspberry%20Pi-32--bit%20supported-brightgreen?logo=raspberrypi)
+![Raspberry Pi 64-bit supported](https://img.shields.io/badge/Raspberry%20Pi-64--bit%20supported-brightgreen?logo=raspberrypi)
+
 <img src="https://vscp.org/images/logo.png" width="100">
 
 
