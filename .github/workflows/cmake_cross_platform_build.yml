@@ -94,13 +94,6 @@ jobs:
         repository: grodansparadis/vscpl2drv-websocksrv
         submodules: 'recursive' 
 
-    - name: Checkout VSCP repository
-      uses: actions/checkout@v4
-      with:
-        repository: grodansparadis/vscp
-        path: vscp
-        ref: development
-
     - name: Display version information
       shell: bash
       run: |
