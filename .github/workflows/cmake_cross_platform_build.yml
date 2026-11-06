@@ -25,7 +25,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: grodansparadis/vscpl2drv-websocksrv
-        ref: ${{ github.ref }}
+        ref: ${{ github.sha }}
         submodules: 'recursive'
 
     - name: Parse version from version.h
@@ -100,7 +100,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: grodansparadis/vscpl2drv-websocksrv
-        ref: ${{ github.ref }}
+        ref: ${{ github.sha }}
         submodules: 'recursive' 
 
     - name: Display version information
