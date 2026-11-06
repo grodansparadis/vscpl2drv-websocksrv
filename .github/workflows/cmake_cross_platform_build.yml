@@ -75,7 +75,7 @@ jobs:
   build:
     needs: version
     name: build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -86,6 +86,7 @@ jobs:
             generator: "Unix Makefiles"
             package_manager: "apt"
           - os: windows-latest
+            runner: windows-2022
             triplet: x64-windows
             generator: "Visual Studio 17 2022"
             package_manager: "vcpkg"
