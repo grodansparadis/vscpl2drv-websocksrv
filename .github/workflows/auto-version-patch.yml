@@ -1,0 +1,88 @@
+name: Update Version on Push
+
+on:
+  push:
+    branches:
+      - "**"
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  bump-version:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pushed branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Increment patch version
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from datetime import datetime, timezone
+          from pathlib import Path
+          import re
+
+          path = Path("src/version.h")
+          text = path.read_text()
+
+          def read_macro(name):
+              pattern = rf"^#define\s+VSCPL2DRV_WEBSOCKSRV_{name}_VERSION\s+(\d+)\s*$"
+              matches = re.findall(pattern, text, re.MULTILINE)
+              if len(matches) != 1:
+                  raise SystemExit(f"Expected exactly one {name} version macro in {path}")
+              return int(matches[0])
+
+          major = read_macro("MAJOR")
+          minor = read_macro("MINOR")
+          patch = read_macro("PATCH")
+
+          now = datetime.now(timezone.utc)
+          if (major, minor) == (now.year, now.month):
+              patch += 1
+          else:
+              major, minor, patch = now.year, now.month, 1
+
+          version = f"{major}.{minor}.{patch}"
+          replacements = {
+              "MAJOR": major,
+              "MINOR": minor,
+              "PATCH": patch,
+          }
+          for name, value in replacements.items():
+              pattern = rf"(^#define\s+VSCPL2DRV_WEBSOCKSRV_{name}_VERSION\s+)\d+(\s*$)"
+              text, count = re.subn(pattern, rf"\g<1>{value}\g<2>", text, count=1, flags=re.MULTILINE)
+              if count != 1:
+                  raise SystemExit(f"Failed to update {name} version macro in {path}")
+
+          pattern = r'(^#define\s+VSCPL2DRV_WEBSOCKSRV_DISPLAY_VERSION\s+")[^"]+(")'
+          text, count = re.subn(pattern, rf"\g<1>{version}\g<2>", text, count=1, flags=re.MULTILINE)
+          if count != 1:
+              raise SystemExit(f"Failed to update display version in {path}")
+
+          path.write_text(text)
+          print(f"Updated project version to {version}")
+          PY
+
+      - name: Commit and push version
+        shell: bash
+        run: |
+          if git diff --quiet -- src/version.h; then
+            echo "Version is already current."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/version.h
+          git commit -m "chore: bump version after push"
+          git push
+
+      - name: Build updated version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run cmake_cross_platform_build.yml --ref "$GITHUB_REF_NAME"

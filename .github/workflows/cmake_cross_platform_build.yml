@@ -1,6 +1,11 @@
 name: CMake Cross-Platform Build
 
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    tags:
+      - "**"
+  pull_request:
+  workflow_dispatch:
 
 env:
   BUILD_TYPE: Release
@@ -20,6 +25,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: grodansparadis/vscpl2drv-websocksrv
+        ref: ${{ github.ref }}
         submodules: 'recursive'
 
     - name: Parse version from version.h
@@ -93,6 +99,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: grodansparadis/vscpl2drv-websocksrv
+        ref: ${{ github.ref }}
         submodules: 'recursive' 
 
     - name: Checkout VSCP repository
