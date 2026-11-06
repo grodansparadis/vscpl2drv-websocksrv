@@ -29,8 +29,6 @@
     MONTH is the release month,
     PATCH is the patch number.
 */
-// I M P O T A N T ! ! ! Lines below must be located at line
-// 35/36/37/38/40/42/43 I M P O T A N T ! ! !
 #define VSCPL2DRV_WEBSOCKSRV_MAJOR_VERSION     2026
 #define VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION     11
 #define VSCPL2DRV_WEBSOCKSRV_PATCH_VERSION   2
