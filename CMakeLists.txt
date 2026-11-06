@@ -320,10 +320,12 @@ endif()
 # Expat C library
 if(WIN32)
 find_package(expat CONFIG REQUIRED)
+target_link_libraries(vscp-common PUBLIC expat::expat)
 else()
 include (FindEXPAT)
 find_package(EXPAT REQUIRED)
 include_directories(${EXPAT_INCLUDE_DIRS})
+target_link_libraries(vscp-common PUBLIC ${EXPAT_LIBRARIES})
 endif()
 
 # Add application sources to library
