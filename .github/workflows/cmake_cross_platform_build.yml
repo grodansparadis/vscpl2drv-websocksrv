@@ -633,7 +633,7 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
             apt-get install -y --no-install-recommends \
-              build-essential cmake git pkg-config \
+              build-essential ca-certificates cmake git pkg-config \
               libexpat1-dev libssl-dev libsodium-dev
             cmake -S . -B build-rpi \
               -DCMAKE_BUILD_TYPE=Release \
