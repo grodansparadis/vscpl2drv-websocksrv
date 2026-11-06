@@ -40,6 +40,14 @@
 #if !defined(USERLIST__INCLUDED_)
 #define USERLIST__INCLUDED_
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <windows.h>
+#endif
+
 #include <sodium.h>
 
 #include <vscp.h>
