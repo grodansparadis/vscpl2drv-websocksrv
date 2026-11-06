@@ -1,0 +1,17 @@
+name: macOS Build Status
+
+on:
+  workflow_run:
+    workflows: ["CMake Cross-Platform Build"]
+    types: [completed]
+
+permissions:
+  actions: read
+
+jobs:
+  status:
+    uses: ./.github/workflows/platform-build-status.yml
+    with:
+      job-name: "build (macos-latest)"
+    permissions:
+      actions: read

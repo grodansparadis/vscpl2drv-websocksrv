@@ -1,0 +1,17 @@
+name: Raspberry Pi 64-bit Build Status
+
+on:
+  workflow_run:
+    workflows: ["CMake Cross-Platform Build"]
+    types: [completed]
+
+permissions:
+  actions: read
+
+jobs:
+  status:
+    uses: ./.github/workflows/platform-build-status.yml
+    with:
+      job-name: "Build (raspberry-pi-64)"
+    permissions:
+      actions: read

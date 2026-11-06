@@ -1,6 +1,6 @@
 name: CMake Cross-Platform Build
 
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 
 env:
   BUILD_TYPE: Release
@@ -68,6 +68,7 @@ jobs:
 
   build:
     needs: version
+    name: build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -602,6 +603,7 @@ jobs:
 
   raspberry-pi:
     needs: version
+    name: Build (${{ matrix.name }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -628,7 +630,7 @@ jobs:
           --platform "${{ matrix.platform }}" \
           --volume "${GITHUB_WORKSPACE}:/workspace" \
           --workdir /workspace \
-          ubuntu:24.04 \
+          debian:bookworm \
           bash -euc '
             export DEBIAN_FRONTEND=noninteractive
             apt-get update

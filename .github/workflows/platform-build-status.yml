@@ -1,0 +1,45 @@
+name: Platform Build Status Check
+
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        description: Matrix job name in the cross-platform build workflow
+        required: true
+        type: string
+
+permissions:
+  actions: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check platform build result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runId = context.payload.workflow_run?.id;
+            if (!runId) {
+              core.setFailed("The triggering workflow run ID is unavailable.");
+              return;
+            }
+
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: runId,
+              },
+            );
+            const target = `${{ inputs.job-name }}`;
+            const job = jobs.find(({ name }) => name === target);
+
+            if (!job) {
+              core.setFailed(`Build job "${target}" was not found in run ${runId}.`);
+              return;
+            }
+            if (job.conclusion !== "success") {
+              core.setFailed(`Build job "${target}" concluded with ${job.conclusion ?? job.status}.`);
+            }

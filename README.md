@@ -1,12 +1,11 @@
 # vscpl2drv-websocksrv
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](./LICENSE)
-[![Cross-platform build](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/cmake_cross_platform_build.yml/badge.svg)](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/cmake_cross_platform_build.yml)
-![Linux supported](https://img.shields.io/badge/Linux-supported-brightgreen?logo=linux)
-![Windows supported](https://img.shields.io/badge/Windows-supported-brightgreen?logo=windows)
-![macOS supported](https://img.shields.io/badge/macOS-supported-brightgreen?logo=apple)
-![Raspberry Pi 32-bit supported](https://img.shields.io/badge/Raspberry%20Pi-32--bit%20supported-brightgreen?logo=raspberrypi)
-![Raspberry Pi 64-bit supported](https://img.shields.io/badge/Raspberry%20Pi-64--bit%20supported-brightgreen?logo=raspberrypi)
+[![Linux build](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/linux-build-status.yml/badge.svg)](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/linux-build-status.yml)
+[![Windows build](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/windows-build-status.yml/badge.svg)](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/windows-build-status.yml)
+[![macOS build](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/macos-build-status.yml/badge.svg)](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/macos-build-status.yml)
+[![Raspberry Pi 32-bit build](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/raspberry-pi-32-build-status.yml/badge.svg)](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/raspberry-pi-32-build-status.yml)
+[![Raspberry Pi 64-bit build](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/raspberry-pi-64-build-status.yml/badge.svg)](https://github.com/grodansparadis/vscpl2drv-websocksrv/actions/workflows/raspberry-pi-64-build-status.yml)
 
 <img src="https://vscp.org/images/logo.png" width="100">
 
