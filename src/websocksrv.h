@@ -587,6 +587,7 @@ public:
     @return VSCP_ERROR_SUCCESS on success, otherwise VSCP error code.
   */
   int sendEventAllClients(const vscpEvent *pEvent);
+  void forwardClientEvent(struct mg_connection *sender, const vscpEventEx &event);
 
   /*!
     @brief Send queued events to a specific client

@@ -148,8 +148,8 @@ CWebSockSession::CWebSockSession(void)
 {
   setWsType(WS_TYPE_1); // ws1 is default
   m_conn_state = WEBSOCK_CONN_STATE_NULL;
-  memset(m_key, 0, 33);
-  memset(m_sid, 0, 33);
+  memset(m_key, 0, sizeof(m_key));
+  memset(m_sid, 0, sizeof(m_sid));
   m_version      = 0;
   lastActiveTime = 0;
   m_conn         = nullptr;
@@ -368,6 +368,10 @@ CWebSockSrv::CWebSockSrv(void)
   m_url_rest      = "/rest";
   m_bEnableStatic = true; // Enable static web pages
 
+  // Match the default authentication key used by the sample clients.
+  vscp_hexStr2ByteArray(m_encryptionKey, sizeof(m_encryptionKey),
+                       "2DBB079A38985AF00EBEEFE22F9FFA0E");
+
   m_mgr = {}; // Initialize mongoose event manager
 
   // Mongoose just log errors (config mongoose-debug)
@@ -557,7 +561,7 @@ CWebSockSrv::doLoadConfig(std::string &path)
   // VSCP key file
   if (m_j_config.contains("key-file") && m_j_config["key-file"].is_string()) {
     if (!readEncryptionKey(m_j_config["key-file"].get<std::string>())) {
-      spdlog::warn("WARNING!!! Default key will be used.");
+      return VSCP_ERROR_PARSING;
     }
   }
   else {
@@ -714,16 +718,18 @@ CWebSockSrv::doLoadConfig(std::string &path)
       m_pathUsers = m_j_config["path-users"].get<std::string>();
       if (!m_userList.loadUsersFromFile(m_pathUsers)) {
         spdlog::critical("ReadConfig: Failed to load users from file "
-                         "'user-path'='{}'. Terminating!",
-                         path);
-        return false;
+                         "'path-users'='{}'. Terminating!",
+                         m_pathUsers);
+        return VSCP_ERROR_PARSING;
       }
     }
     catch (const std::exception &ex) {
       spdlog::error("ReadConfig: Failed to read 'path-users' Error='{}'", ex.what());
+      return VSCP_ERROR_PARSING;
     }
     catch (...) {
       spdlog::error("ReadConfig: Failed to read 'path-users' due to unknown error.");
+      return VSCP_ERROR_PARSING;
     }
   }
   else {
@@ -1583,6 +1589,32 @@ CWebSockSrv::sendQueueEventsToClient(CWebSockSession *pSession)
 //   return sendEvent(pSession->getClientItem(), pex);
 // }
 
+void
+CWebSockSrv::forwardClientEvent(struct mg_connection *sender, const vscpEventEx &event)
+{
+  vscpEvent converted{};
+  if (!vscp_convertEventExToEvent(&converted, &event)) {
+    spdlog::error("Failed to convert client event for forwarding.");
+    return;
+  }
+
+  pthread_mutex_lock(&m_mutex_websocketSession);
+  for (const auto &entry : m_websocketSessionMap) {
+    CWebSockSession *session = entry.second;
+    if (!session || !session->getConnection() || session->getConnection() == sender ||
+        !session->isAuthenticated() || !session->isOpen() ||
+        !(session->getUserItem()->getUserRights() & VSCP_USER_RIGHT_ALLOW_RCV_EVENT)) {
+      continue;
+    }
+    // The normal event queue applies receive permissions, filters and protocol encoding.
+    if (VSCP_ERROR_SUCCESS != session->addToInputQueue(&converted)) {
+      spdlog::error("Failed to queue forwarded event for client {}.", entry.first);
+    }
+  }
+  pthread_mutex_unlock(&m_mutex_websocketSession);
+  vscp_deleteEvent(&converted);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // postIncomingEvent
 //
@@ -1670,10 +1702,10 @@ CWebSockSrv::postIncomingEvent(void)
 
 int
 CWebSockSrv::authentication(struct mg_connection *conn, std::string &strContent, std::string &strIV)
+try
 {
-  uint8_t buf[2048]; //, secret[2048];
   uint8_t iv[16];
-  std::string strUser, strPassword;
+  std::string strUser;
 
   bool bValidHost = false;
 
@@ -1695,62 +1727,64 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strContent,
     return false;
   }
 
-  if (0 == vscp_hexStr2ByteArray(iv, 16, (const char *) strIV.c_str())) {
-    spdlog::error("[Websocket Client] Authentication: No room "
-                  "for iv block. ");
-    return false; // Not enough room in buffer
+  if (strIV.size() != 32 ||
+      strIV.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+    spdlog::error("[Websocket Client] Authentication: IV must contain 32 hexadecimal characters.");
+    return false;
   }
-
-  uint8_t content[16];
-  if (0 == vscp_hexStr2ByteArray(content, 16, (const char *) strContent.c_str())) {
-    spdlog::error("[Websocket Client] Authentication: No room "
-                  "for content block. ");
-    return false; // Not enough room in buffer
+  std::string sid = strIV;
+  std::transform(sid.begin(), sid.end(), sid.begin(), ::toupper);
+  if (sid != pSession->getSid()) {
+    spdlog::error("[Websocket Client] Authentication: IV does not match the session challenge.");
+    return false;
   }
+  vscp_hexStr2ByteArray(iv, sizeof(iv), strIV.c_str());
 
-  // Size should always be 16 bytes here - no padding required
+  uint8_t content[2032];
+  if (strContent.empty() || strContent.size() % 32 != 0 ||
+      strContent.size() > sizeof(content) * 2 ||
+      strContent.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+    spdlog::error("[Websocket Client] Authentication: Ciphertext must contain complete AES blocks (maximum {} bytes).",
+                  sizeof(content));
+    return false;
+  }
+  const size_t contentSize = vscp_hexStr2ByteArray(content, sizeof(content), strContent.c_str());
 
-  memset(buf, 0, sizeof(buf));
-  AES_CBC_decrypt_buffer(AES128, buf, content, 16, m_encryptionKey, iv);
+  SecureBytes plaintext(contentSize + 1, 0);
+  AES_CBC_decrypt_buffer(AES128, plaintext.data(), content, static_cast<uint32_t>(contentSize), m_encryptionKey, iv);
 
-  std::string str = std::string((const char *) buf);
-  std::deque<std::string> tokens;
-  vscp_split(tokens, str, ":");
-
-  if (tokens.size() < 2) {
+  const auto end = std::find(plaintext.begin(), plaintext.end(), 0);
+  const std::string_view str(reinterpret_cast<const char*>(plaintext.data()),
+                             static_cast<size_t>(end - plaintext.begin()));
+  const size_t separator = str.find(':');
+  if (separator == std::string::npos) {
     spdlog::error("[Websocket Client] Authentication: Malformed "
                   "authentication data from client. (Should be 'user:password') ");
     return false; // Not enough tokens
   }
 
-  // Get username
-  if (tokens.empty()) {
+  strUser.assign(str.data(), separator);
+  vscp_trim(strUser);
+  const std::string_view strPassword = str.substr(separator + 1);
+
+  if (strUser.empty()) {
     spdlog::error("[Websocket Client] Authentication: Missing "
                   "username from client. ");
     return false; // No username
   }
 
-  strUser = tokens.front();
-  tokens.pop_front();
-  vscp_trim(strUser);
-
-  // Get password
-  if (tokens.empty()) {
+  if (strPassword.empty()) {
     spdlog::error("[Websocket Client] Authentication: Missing "
                   "password from client. ");
     return false; // No username
   }
 
-  strPassword = tokens.front();
-  tokens.pop_front();
-  vscp_trim(strPassword);
-
   char addrbuf[64];
   if (conn->rem.is_ip6) {
-    mg_snprintf(addrbuf, sizeof(addrbuf), "%M", mg_print_ip6, "abcdefghijklmnop");
+    mg_snprintf(addrbuf, sizeof(addrbuf), "%M", mg_print_ip6, conn->rem.addr.ip6);
   }
   else {
-    mg_snprintf(addrbuf, sizeof(addrbuf), "%M", mg_print_ip4, "abcd");
+    mg_snprintf(addrbuf, sizeof(addrbuf), "%M", mg_print_ip4, &conn->rem.addr.ip4);
   }
 
   // validateUser verifies the plaintext password against the stored Argon2id
@@ -1765,7 +1799,7 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strContent,
   }
 
   // Check if remote ip is valid
-  bValidHost = pUserItem->isAllowedToConnect(conn->rem.addr.ip4);
+  bValidHost = (1 == pUserItem->isAllowedToConnect(conn->rem.addr.ip4));
 
   if (!bValidHost) {
     // Log valid login
@@ -1789,6 +1823,11 @@ CWebSockSrv::authentication(struct mg_connection *conn, std::string &strContent,
                addrbuf,
                (const char *) strUser.c_str());
   return true;
+}
+catch (const std::exception &ex)
+{
+  spdlog::error("[Websocket Client] Authentication failed: {}", ex.what());
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2265,24 +2304,7 @@ CWebSockSrv::ws1_message(struct mg_connection *conn, std::string &strWsPkt)
           mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
         }
 
-        // Send event to all other clients
-        for (struct mg_connection *wc = conn->mgr->conns; wc != NULL; wc = wc->next) {
-
-          if (wc == conn) {
-            continue; // Don't send it back to the sender
-          }
-
-          if (NULL == wc->pfn_data) {
-            // Write it out
-            if (WS_TYPE_1 == pSession->getWsType()) {
-              std::string str;
-              if (vscp_convertEventExToString(str, &ex)) {
-                str = ("E;") + str;
-                mg_ws_send(wc, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-              }
-            }
-          }
-        }
+        forwardClientEvent(conn, ex);
       }
     } // 'E'
     break;
@@ -2409,14 +2431,6 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
 
       std::string strCrypto = tokens.front();
       tokens.pop_front();
-
-      // Should be 32 characters long
-      if (strCrypto.length() != 32) {
-        spdlog::error("WS1: AUTH failed (invalid length of crypto)");
-        str = vscp_str_format(("-;AUTH;%d;%s"), (int) WEBSOCK_ERROR_SYNTAX_ERROR, WEBSOCK_STR_ERROR_SYNTAX_ERROR);
-        mg_ws_send(conn, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-        return VSCP_ERROR_SUCCESS; // We still leave channel open
-      }
 
       // Make uppercase
       std::transform(strCrypto.begin(), strCrypto.end(), strCrypto.begin(), ::toupper);
@@ -2584,11 +2598,10 @@ CWebSockSrv::ws1_command(struct mg_connection *conn, std::string &strCmd)
       return VSCP_ERROR_SUCCESS; // We still leave channel open
     }
 
-    std::deque<vscpEvent *>::iterator it;
     pthread_mutex_lock(&pSession->m_mutexInputQueue);
 
-    for (it = pSession->m_inputQueue.begin(); it != pSession->m_inputQueue.end(); ++it) {
-      vscpEvent *pEvent = *it;
+    while (!pSession->m_inputQueue.empty()) {
+      vscpEvent *pEvent = pSession->m_inputQueue.front();
       pSession->m_inputQueue.pop_front();
       vscp_deleteEvent_v2(&pEvent);
     }
@@ -3079,23 +3092,7 @@ CWebSockSrv::ws2_message(struct mg_connection *conn, std::string &strWsPkt)
                   return true; // 'true' leave connection open
                 }
 
-                // Sent to all other clients
-                for (struct mg_connection *wc = conn->mgr->conns; wc != NULL; wc = wc->next) {
-
-                  if (wc == conn) {
-                    continue; // Don't send it back to the sender
-                  }
-
-                  if (NULL == wc->pfn_data) {
-                    // Write it out
-                    if (WS_TYPE_2 == pSession->getWsType()) {
-                      std::string str;
-                      if (vscp_convertEventExToJSON(str, &ex)) {
-                        mg_ws_send(wc, (const char *) str.c_str(), str.length(), WEBSOCKET_OP_TEXT);
-                      }
-                    }
-                  }
-                }
+                forwardClientEvent(conn, ex);
               } // convert from JSON
             }
           }
@@ -3428,10 +3425,9 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
       return false; // We still leave channel open
     }
 
-    std::deque<vscpEvent *>::iterator it;
     pthread_mutex_lock(&pSession->m_mutexInputQueue);
 
-    for (it = pSession->m_inputQueue.begin(); it != pSession->m_inputQueue.end(); ++it) {
+    while (!pSession->m_inputQueue.empty()) {
       vscpEvent *pEvent = pSession->m_inputQueue.front();
       pSession->m_inputQueue.pop_front();
       vscp_deleteEvent_v2(&pEvent);
@@ -3471,7 +3467,7 @@ CWebSockSrv::ws2_command(struct mg_connection *conn, std::string &strCmd, json &
     std::string strvalue;
 
     std::string strResult = ("{ \"copyright\" : \"");
-    // strResult += VSCPD_COPYRIGHT;
+    strResult += VSCPL2DRV_WEBSOCKSRV_COPYRIGHT;
     strResult += "\" }";
 
     // Positive reply
@@ -3802,26 +3798,27 @@ CWebSockSrv::ws2_xcommand(struct mg_connection *conn, std::string &strCmd)
 bool
 CWebSockSrv::readEncryptionKey(const std::string &path)
 {
-  // TODO Key is in session object
-  try {
-    // uint8_t key[33];
-    std::ifstream in(path, std::ifstream::in);
-    std::stringstream strStream;
-    strStream << in.rdbuf();
-    size_t cnt = vscp_hexStr2ByteArray(m_encryptionKey, 32, strStream.str().c_str());
-    if (cnt != 32) {
-      spdlog::error("Encryption key file [{0}] is invalid.", getKeyPath().c_str());
-      in.close();
-      return false;
-    }
-
-    in.close();
-  }
-  catch (...) {
-    spdlog::error("Failed to read encryption key file [{0}]", getKeyPath().c_str());
+  std::ifstream in(path);
+  if (!in.is_open()) {
+    spdlog::error("Failed to open encryption key file [{}].", path);
     return false;
   }
 
+  std::stringstream strStream;
+  strStream << in.rdbuf();
+  if (in.bad()) {
+    spdlog::error("Failed to read encryption key file [{}].", path);
+    return false;
+  }
+
+  std::string key = strStream.str();
+  vscp_trim(key);
+  if (key.size() < sizeof(m_encryptionKey) * 2 || key.size() % 2 != 0 ||
+      key.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+    spdlog::error("Encryption key file [{}] must contain at least 32 hexadecimal characters.", path);
+    return false;
+  }
+  vscp_hexStr2ByteArray(m_encryptionKey, sizeof(m_encryptionKey), key.c_str());
   return true;
 }
 

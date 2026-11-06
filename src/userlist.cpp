@@ -34,6 +34,7 @@
 #endif
 
 #include <deque>
+#include <cstdio>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -41,7 +42,6 @@
 #include <utility>
 #include <vector>
 
-//#include <canal-macro.h>
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
@@ -52,6 +52,24 @@
 
 #include "userlist.h"
 #include <vscphelper.h>
+
+namespace {
+
+std::deque<std::string_view>
+splitUserFields(std::string_view record)
+{
+    std::deque<std::string_view> fields;
+    while (true) {
+        const auto separator = record.find(';');
+        fields.push_back(record.substr(0, separator));
+        if (separator == std::string_view::npos) {
+            return fields;
+        }
+        record.remove_prefix(separator + 1);
+    }
+}
+
+}
 
 // Forward declarations
 void
@@ -68,7 +86,7 @@ vscp_md5(char* digest, const unsigned char* buf, size_t len);
 /*
 
     const std::string pw = "correct horse battery staple";
-    const std::string stored = hash_password(pw);
+    const SecureString stored = hash_password(pw);
     std::printf("hash:   %s\n", stored.c_str());
     std::printf("good:   %s\n", verify_password(stored, pw) ? "ok" : "FAIL");
     std::printf("bad:    %s\n", verify_password(stored, "wrong") ? "FAIL" :
@@ -86,34 +104,34 @@ constexpr size_t MEM_LIMIT             = crypto_pwhash_MEMLIMIT_INTERACTIVE;
 // Returns a self-contained string like
 // "$argon2id$v=19$m=65536,t=2,p=1$<salt>$<hash>" Store this string in a single
 // database column.
-std::string
-hash_password(const std::string& password)
+SecureString
+hash_password(std::string_view password)
 {
-    char out[crypto_pwhash_STRBYTES];
-    if (crypto_pwhash_str_alg(out,
-                              password.c_str(),
+    SecureBytes out(crypto_pwhash_STRBYTES);
+    if (crypto_pwhash_str_alg(reinterpret_cast<char*>(out.data()),
+                              password.empty() ? "" : password.data(),
                               password.size(),
                               OPS_LIMIT,
                               MEM_LIMIT,
                               crypto_pwhash_ALG_ARGON2ID13) != 0) {
         throw std::runtime_error("password hashing failed (out of memory?)");
     }
-    return std::string(out);
+    return SecureString(reinterpret_cast<const char*>(out.data()));
 }
 
 // Constant-time verification.
 bool
-verify_password(const std::string& stored_hash, const std::string& password)
+verify_password(const SecureString& stored_hash, std::string_view password)
 {
     return crypto_pwhash_str_verify(stored_hash.c_str(),
-                                    password.c_str(),
+                                    password.empty() ? "" : password.data(),
                                     password.size()) == 0;
 }
 
 // True if the stored hash uses weaker parameters than the current settings
 // (or a different algorithm) and should be re-hashed at next successful login.
 bool
-needs_rehash(const std::string& stored_hash)
+needs_rehash(const SecureString& stored_hash)
 {
     return crypto_pwhash_str_needs_rehash(stored_hash.c_str(),
                                           OPS_LIMIT,
@@ -184,10 +202,10 @@ CUserItem::fixName(void)
 //
 
 bool
-CUserItem::validatePassword(const std::string& password)
+CUserItem::validatePassword(std::string_view password)
 {
     return crypto_pwhash_str_verify(m_passwordhash.c_str(),
-                                    password.c_str(),
+                                    password.empty() ? "" : password.data(),
                                     password.size()) == 0;
 }
 
@@ -201,8 +219,7 @@ bool
 CUserItem::setFromString(const std::string& userSettings)
 {
     std::string strToken;
-    std::deque<std::string> tokens;
-    vscp_split(tokens, userSettings, ";");
+    auto tokens = splitUserFields(userSettings);
 
     // name
     if (!tokens.empty()) {
@@ -217,11 +234,12 @@ CUserItem::setFromString(const std::string& userSettings)
 
     // password
     if (!tokens.empty()) {
-        strToken = tokens.front();
+        std::string_view hash = tokens.front();
         tokens.pop_front();
-        vscp_trim(strToken);
-        if (strToken.length()) {
-            setPassword(strToken);
+        const auto first = hash.find_first_not_of(" \t\r\n");
+        if (first != std::string_view::npos) {
+            hash = hash.substr(first, hash.find_last_not_of(" \t\r\n") - first + 1);
+            setPassword(hash);
         }
     }
 
@@ -311,11 +329,7 @@ CUserItem::getAsString(std::string& strUser)
     strUser += getUserName();
     strUser += ";";
     // Protect password
-    str = getPassword();
-    for (size_t i = 0; i < str.length(); i++) {
-        strUser += "*";
-    }
-    // strUser += getPassword();
+    strUser.append(m_passwordhash.size(), '*');
     strUser += ";";
     strUser += getFullname();
     strUser += ";";
@@ -354,11 +368,7 @@ CUserItem::getAsMap(std::map<std::string, std::string>& mapUser)
     mapUser["name"]   = getUserName();
 
     // Protect password
-    wstr = "";
-    str  = getPassword();
-    for (size_t i = 0; i < str.length(); i++) {
-        wstr += "*";
-    }
+    wstr.assign(m_passwordhash.size(), '*');
     mapUser["password"] = wstr;
     mapUser["fullname"] = getFullname();
 
@@ -822,22 +832,41 @@ CUserList::~CUserList(void)
 
 bool
 CUserList::loadUsersFromFile(const std::string& filename)
+try
 {
-    std::ifstream file(filename);
-    if (!file.is_open()) {
+    const auto closeFile = [](FILE* stream) { std::fclose(stream); };
+    std::unique_ptr<FILE, decltype(closeFile)> file(std::fopen(filename.c_str(), "rb"), closeFile);
+    if (!file) {
         spdlog::error("loadUsersFromFile: Failed to open user file '{}'.",
                       filename);
         return false;
     }
-
-    nlohmann::json data;
-    try {
-        file >> data;
+    if (std::setvbuf(file.get(), nullptr, _IONBF, 0) != 0) {
+        spdlog::error("loadUsersFromFile: Cannot disable ordinary input buffering for '{}'.", filename);
+        return false;
     }
-    catch (const nlohmann::json::parse_error& ex) {
-        spdlog::error("loadUsersFromFile: Invalid JSON in '{}': {}",
+
+    SecureBytes input;
+    SecureBytes chunk(4096);
+    size_t count;
+    while ((count = std::fread(chunk.data(), 1, chunk.size(), file.get())) != 0) {
+        input.insert(input.end(), chunk.begin(), chunk.begin() + count);
+    }
+    if (std::ferror(file.get())) {
+        spdlog::error("loadUsersFromFile: Failed to read user file '{}'.", filename);
+        return false;
+    }
+
+    using UserJson = nlohmann::basic_json<std::map, std::vector, SecureString>;
+    UserJson data;
+    try {
+        data = UserJson::parse(input.begin(), input.end());
+    }
+    catch (const UserJson::parse_error& ex) {
+        // Parser diagnostics can quote sensitive input; report only its position.
+        spdlog::error("loadUsersFromFile: Invalid JSON in '{}' at byte {}.",
                       filename,
-                      ex.what());
+                      ex.byte);
         return false;
     }
 
@@ -850,7 +879,7 @@ CUserList::loadUsersFromFile(const std::string& filename)
 
     struct UserRecord {
         std::string name;
-        std::string password;
+        SecureString password;
         std::string fullname;
         std::string note;
         std::string rights;
@@ -861,7 +890,7 @@ CUserList::loadUsersFromFile(const std::string& filename)
 
     std::vector<UserRecord> records;
     const auto read_string_field =
-      [&filename](const nlohmann::json& user,
+      [&filename](const UserJson& user,
                   const char* key,
                   const std::string& separator,
                   bool allow_array,
@@ -874,7 +903,8 @@ CUserList::loadUsersFromFile(const std::string& filename)
           }
 
           if (field->is_string()) {
-              value = field->get<std::string>();
+              const auto& text = field->get_ref<const SecureString&>();
+              value.assign(text.data(), text.size());
               return true;
           }
 
@@ -891,12 +921,12 @@ CUserList::loadUsersFromFile(const std::string& filename)
                       return false;
                   }
 
-                  const std::string part = item.get<std::string>();
+                  const auto& part = item.get_ref<const SecureString&>();
                   if (!part.empty()) {
                       if (!value.empty()) {
                           value += separator;
                       }
-                      value += part;
+                      value.append(part.data(), part.size());
                   }
               }
               return true;
@@ -934,14 +964,21 @@ CUserList::loadUsersFromFile(const std::string& filename)
             return false;
         }
 
-        if (!read_string_field(
-              user, "password", "", false, record.password, index) ||
-            record.password.empty()) {
+        const auto password = user.find("password");
+        if (password == user.end() || !password->is_string() ||
+            password->get_ref<const SecureString&>().empty()) {
             spdlog::error(
               "loadUsersFromFile: User '{}' in '{}' must have a non-empty "
               "string 'password'.",
               record.name,
               filename);
+            return false;
+        }
+        record.password = password->get_ref<const SecureString&>();
+        if (record.password.compare(0, 10, "$argon2id$") != 0 ||
+            record.password.size() >= crypto_pwhash_STRBYTES ||
+            crypto_pwhash_str_needs_rehash(record.password.c_str(), OPS_LIMIT, MEM_LIMIT) < 0) {
+            spdlog::error("loadUsersFromFile: User '{}' must have an Argon2id password hash.", record.name);
             return false;
         }
 
@@ -979,7 +1016,7 @@ CUserList::loadUsersFromFile(const std::string& filename)
 
     for (const auto& record : records) {
         if (!addUser(record.name,
-                     record.password,
+                     std::string_view(record.password.data(), record.password.size()),
                      record.fullname,
                      record.note,
                      &record.filter,
@@ -995,6 +1032,11 @@ CUserList::loadUsersFromFile(const std::string& filename)
     }
 
     return true;
+}
+catch (const std::exception& ex)
+{
+    spdlog::error("loadUsersFromFile: Failed to load '{}': {}", filename, ex.what());
+    return false;
 }
 
 uint32_t
@@ -1012,7 +1054,7 @@ CUserList::getUserCount(void) const
 
 bool
 CUserList::addUser(const std::string& user,
-                   const std::string& passwordHash,
+                   std::string_view passwordHash,
                    const std::string& fullname,
                    const std::string& strNote,
                    const vscpEventFilter* pFilter,
@@ -1069,7 +1111,7 @@ CUserList::addUser(const std::string& strUser,
 {
     std::string strToken;
     std::string user;
-    std::string passwordHash;
+    std::string_view passwordHash;
     std::string fullname;
     std::string strNote;
     vscpEventFilter filter;
@@ -1078,8 +1120,7 @@ CUserList::addUser(const std::string& strUser,
     std::string allowedRemotes;
     std::string allowedEvents;
 
-    std::deque<std::string> tokens;
-    vscp_split(tokens, strUser, ";");
+    auto tokens = splitUserFields(strUser);
 
     // user
     if (!tokens.empty()) {
@@ -1101,13 +1142,13 @@ CUserList::addUser(const std::string& strUser,
 
     // filter
     if (!tokens.empty()) {
-        vscp_readFilterFromString(&filter, tokens.front());
+        vscp_readFilterFromString(&filter, std::string(tokens.front()));
         tokens.pop_front();
     }
 
     // mask
     if (!tokens.empty()) {
-        vscp_readMaskFromString(&filter, tokens.front());
+        vscp_readMaskFromString(&filter, std::string(tokens.front()));
         tokens.pop_front();
     }
 
@@ -1145,7 +1186,7 @@ CUserList::addUser(const std::string& strUser,
     // flags
     uint32_t bFlags = 0;
     if (!tokens.empty()) {
-        bFlags = std::stoul(tokens.front());
+        bFlags = std::stoul(std::string(tokens.front()));
         tokens.pop_front();
     }
 
@@ -1242,7 +1283,7 @@ CUserList::getUser(const long userid)
 
 CUserItemPtr
 CUserList::validateUser(const std::string& user,
-                        const std::string& password)
+                        std::string_view password)
 {
     auto pUserItem = getUser(user);
     if (!pUserItem) {

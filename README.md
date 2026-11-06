@@ -3,7 +3,7 @@
 <img src="https://vscp.org/images/logo.png" width="100">
 
 
-  * **Available for**: Linux, Windows, MacOS
+  * **Available for**: Linux (Including Raspberry Pi 32/64-bit), Windows, MacOS
   * **Driver Linux**: libvscpl2drv-websocksrv.so
   * **Driver Windows**: vscpl2drv-websocksrv.dll
   * **Driver MacOS**: libvscpl2drv-websocksrv.dylib

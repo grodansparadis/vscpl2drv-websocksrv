@@ -29,22 +29,18 @@ cmake_minimum_required(VERSION 3.5)
 # Parse version from version.h file FIRST
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/version.h" VERSION_H_CONTENT)
 
-# Extract version components using regex
-string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_MAJOR_VERSION[ \t]+([0-9]+)" _ ${VERSION_H_CONTENT})
-set(VERSION_MAJOR ${CMAKE_MATCH_1})
+# Extract and validate the year.month.patch components.
+foreach(COMPONENT MAJOR MINOR PATCH)
+    string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_${COMPONENT}_VERSION[ \t]+([0-9]+)" VERSION_MATCH "${VERSION_H_CONTENT}")
+    if(NOT VERSION_MATCH)
+        message(FATAL_ERROR "Missing or invalid VSCPL2DRV_WEBSOCKSRV_${COMPONENT}_VERSION in src/version.h")
+    endif()
+    set(VERSION_${COMPONENT} "${CMAKE_MATCH_1}")
+endforeach()
 
-string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION[ \t]+([0-9]+)" _ ${VERSION_H_CONTENT})
-set(VERSION_MINOR ${CMAKE_MATCH_1})
-
-string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION[ \t]+([0-9]+)" _ ${VERSION_H_CONTENT})
-set(VERSION_PATCH ${CMAKE_MATCH_1})
-
-string(REGEX MATCH "#define[ \t]+VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION[ \t]+([0-9]+)" _ ${VERSION_H_CONTENT})
-set(VERSION_BUILD ${CMAKE_MATCH_1})
-
-# Construct version string
-set(PROJECT_VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}.${VERSION_BUILD}")
-set(PROJECT_VERSION_SHORT "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
+# Construct year.month.patch version string.
+set(PROJECT_VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
+set(PROJECT_VERSION_SHORT "${PROJECT_VERSION}")
 
 # Now declare the project with parsed version
 project(vscpl2drv-websocksrv VERSION ${PROJECT_VERSION_SHORT} LANGUAGES CXX C)
@@ -52,7 +48,7 @@ set(PACKAGE_AUTHOR "Ake Hedman, the VSCP Project")
 
 # Print version information
 message(STATUS "Project version: ${PROJECT_VERSION}")
-message(STATUS "Version components - Major: ${VERSION_MAJOR}, Minor: ${VERSION_MINOR}, Patch: ${VERSION_PATCH}, Build: ${VERSION_BUILD}")
+message(STATUS "Version components - Year: ${VERSION_MAJOR}, Month: ${VERSION_MINOR}, Patch: ${VERSION_PATCH}")
 
 # Create cmake directory if it doesn't exist and configure version header
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/cmake")
@@ -397,6 +393,18 @@ else()
     vscp-common
     ${SODIUM_LIBRARY}
   )
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(test-securememory test/test_securememory.cpp src/userlist.cpp)
+  target_link_libraries(test-securememory PRIVATE vscp-common ${SODIUM_LIBRARY} ${THREAD_LIBRARIES})
+  if(WIN32)
+    target_link_libraries(test-securememory PRIVATE expat::expat ws2_32)
+  else()
+    target_link_libraries(test-securememory PRIVATE ${EXPAT_LIBRARIES})
+  endif()
+  add_test(NAME secure-password-memory COMMAND test-securememory "${CMAKE_CURRENT_SOURCE_DIR}/debug/users.json")
 endif()
 
 # Install

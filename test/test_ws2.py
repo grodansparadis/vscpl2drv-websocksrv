@@ -4,18 +4,18 @@ VSCP WS2 Protocol Client
 Demonstrates JSON-based WebSocket communication with VSCP server
 """
 
-import ssl
+import os
 import time
 import json
 import websocket
 from Crypto.Cipher import AES
-from datetime import datetime
+from datetime import datetime, timezone
 
-WS_URL = 'ws://localhost:8884/ws2'   # or wss://...
-USERNAME = 'admin'
-PASSWORD = 'secret'
+WS_URL = os.environ.get('VSCP_WS_URL', 'ws://localhost:8884/ws2')
+USERNAME = os.environ.get('VSCP_USERNAME', 'admin')
+PASSWORD = os.environ.get('VSCP_PASSWORD', 'secret')
 # 16-byte shared key in hex (AES-128)
-VSCP_KEY_HEX = '2DBB079A38985AF00EBEEFE22F9FFA0E'
+VSCP_KEY_HEX = os.environ.get('VSCP_KEY_HEX', '2DBB079A38985AF00EBEEFE22F9FFA0E')
 
 def zero_pad(b: bytes, block=16) -> bytes:
     """Zero padding to 16-byte boundary (no extra block if already aligned)"""
@@ -24,17 +24,13 @@ def zero_pad(b: bytes, block=16) -> bytes:
 
 def parse_msg(text: str):
     """Parse JSON message"""
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError as e:
-        print(f'JSON parse error: {e}')
-        return {'type': 'UNKNOWN', 'raw': text}
+    return json.loads(text.strip())
 
 def recv_until_response(ws, command=None, timeout=10.0):
     """Receive messages until we get a response for our command"""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        ws.settimeout(max(0.1, deadline - time.time()))
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        ws.settimeout(max(0.1, deadline - time.monotonic()))
         data = ws.recv()
         if isinstance(data, bytes):
             data = data.decode('utf-8', errors='replace')
@@ -42,13 +38,15 @@ def recv_until_response(ws, command=None, timeout=10.0):
         msg = parse_msg(data)
         
         # Print events immediately
-        if msg.get('type') == 'E':
+        if msg.get('type') in ('E', 'EVENT'):
             print(f'Event: {json.dumps(msg, indent=2)}')
             continue
         
         # Return on any response (+/-) matching our command (or any if command is None)
         if msg.get('type') in ('+', '-'):
             if command is None or msg.get('command') == command:
+                if msg['type'] == '-':
+                    raise RuntimeError(f'Server rejected request: {msg}')
                 return msg
         
         # Other messages
@@ -88,7 +86,7 @@ def send_event(ws, vscp_class: int, vscp_type: int, guid: str, data=None, note='
             'vscpClass': vscp_class,
             'vscpType': vscp_type,
             'obid': 0,
-            'dateTime': datetime.utcnow().isoformat() + 'Z',
+            'datetime': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
             'timestamp': 0,
             'guid': guid,
             'data': data,
@@ -97,6 +95,7 @@ def send_event(ws, vscp_class: int, vscp_type: int, guid: str, data=None, note='
     }
     
     send_json(ws, event)
+    return recv_until_response(ws, 'EVENT', timeout=5)
 
 def encrypt_auth(iv_hex: str, key_hex: str, username: str, password: str) -> str:
     """Encrypt username:password with AES-128-CBC using zero padding"""
@@ -109,13 +108,15 @@ def encrypt_auth(iv_hex: str, key_hex: str, username: str, password: str) -> str
     return ct.hex().upper()
 
 def main():
-    sslopt = None
-    if WS_URL.startswith('wss://'):
-        # For self-signed testing, disable verification (NOT for production)
-        sslopt = {"cert_reqs": ssl.CERT_NONE}
-
     print(f'Connecting to {WS_URL}...')
-    ws = websocket.create_connection(WS_URL, timeout=5, sslopt=sslopt)
+    ws = websocket.create_connection(WS_URL, timeout=5)
+    try:
+        run_session(ws)
+    finally:
+        ws.close()
+    print('Connection closed')
+
+def run_session(ws):
     print('Connected to WS2 server')
 
     # 1) Wait for AUTH0
@@ -202,26 +203,25 @@ def main():
 
     # 6) Read a few incoming frames (events/responses)
     print('\n=== Listening for events (5 seconds) ===')
-    try:
-        ws.settimeout(5.0)
-        for _ in range(10):
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        ws.settimeout(max(0.1, deadline - time.monotonic()))
+        try:
             msg = ws.recv()
-            if isinstance(msg, bytes):
-                msg = msg.decode('utf-8', errors='replace')
-            parsed = parse_msg(msg)
-            print(f'Recv: {json.dumps(parsed, indent=2)}')
-    except websocket.WebSocketTimeoutException:
-        print('No more messages (timeout)')
-    except Exception as e:
-        print(f'Read error: {e}')
+        except websocket.WebSocketTimeoutException:
+            break
+        if not msg:
+            raise ConnectionError('Server closed the connection')
+        if isinstance(msg, bytes):
+            msg = msg.decode('utf-8', errors='replace')
+        parsed = parse_msg(msg)
+        print(f'Recv: {json.dumps(parsed, indent=2)}')
 
     # 7) Close channel and connection
     print('\n=== Closing ===')
     resp = send_command(ws, 'CLOSE')
     print(f'CLOSE response: {json.dumps(resp, indent=2)}')
     
-    ws.close()
-    print('✓ Connection closed')
 
 if __name__ == '__main__':
     main()

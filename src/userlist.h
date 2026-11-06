@@ -49,6 +49,9 @@
 #include <map>
 #include <memory>
 #include <shared_mutex>
+#include <string_view>
+
+#include "securememory.h"
 
 // User rights bit array
 // "admin" has all rights.
@@ -153,7 +156,7 @@ class CUserItem {
         @param password Plaintext password to validate
         @return True if the password is valid, false otherwise
     */
-    bool validatePassword(const std::string& password);
+    bool validatePassword(std::string_view password);
 
     /*
         IP ACL. By default, empty or non defined, meaning all IPs are allowed to
@@ -255,9 +258,9 @@ class CUserItem {
         @param password Password to check
         @return true If password is correct
     */
-    bool checkPassword(const std::string& password)
+    bool checkPassword(std::string_view password)
     {
-        return (getPassword() == password);
+        return validatePassword(password);
     };
 
 
@@ -271,11 +274,17 @@ class CUserItem {
     std::string getUserName(void) { return m_username; };
     void setUserName(const std::string& strUser) { m_username = strUser; };
 
-    // Password
-    std::string getPassword(void) { return m_passwordhash; };
-    void setPassword(const std::string& strPasswordhash)
+    // Hash views borrow secure storage and are invalidated by replacement or destruction.
+    std::string_view getPassword(void) const
     {
-        m_passwordhash = strPasswordhash;
+        return {m_passwordhash.data(), m_passwordhash.size()};
+    };
+    void setPassword(std::string_view strPasswordhash)
+    {
+        SecureString replacement;
+        replacement.reserve(crypto_pwhash_STRBYTES);
+        replacement.assign(strPasswordhash.data(), strPasswordhash.size());
+        m_passwordhash.swap(replacement);
     };
 
     // Full name
@@ -493,7 +502,7 @@ class CUserItem {
     std::string m_username;
 
     /// Password
-    std::string m_passwordhash;
+    SecureString m_passwordhash;
 
     /// Full name
     std::string m_fullname;
@@ -580,7 +589,7 @@ class CUserList {
         @return true on success. false on failure.
     */
     bool addUser(const std::string& user,
-                 const std::string& passwordHash,
+                 std::string_view passwordHash,
                  const std::string& fullname,
                  const std::string& strNote,
                  const vscpEventFilter* pFilter    = NULL,
@@ -637,7 +646,7 @@ class CUserList {
         @return Shared pointer to the user if valid, nullptr otherwise
     */
     CUserItemPtr validateUser(const std::string& user,
-                              const std::string& passwordHash);
+                              std::string_view password);
 
 
     /*!

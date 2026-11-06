@@ -18,6 +18,10 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <time.h>
+#include <signal.h>
+
+static volatile sig_atomic_t stopped = 0;
+static void handle_signal(int signal_number) { (void) signal_number; stopped = 1; }
 
 #define WS_URL   "ws://localhost:8884/ws2"
 #define USERNAME "admin"
@@ -32,6 +36,11 @@ struct client_state {
   const char *username;
   const char *password;
   bool sent_open;
+  bool done;
+  bool failed;
+  bool received_event;
+  bool event_sent;
+  const char *url;
 };
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -163,20 +172,6 @@ send_json(struct mg_connection *c, const char *json)
 }
 
 /////////////////////////////////////////////////////////////////////////////////
-// sendClose
-//
-
-static void
-sendClose(void *arg)
-{
-  struct mg_connection *c = (struct mg_connection *) (uintptr_t) arg;
-  if (c) {
-    printf("\n=== Sending CLOSE command ===\n");
-    send_json(c, "{\"type\":\"CMD\",\"command\":\"CLOSE\",\"args\":{}}");
-  }
-}
-
-/////////////////////////////////////////////////////////////////////////////////
 // handle_auth0
 //
 
@@ -190,17 +185,23 @@ handle_auth0(struct mg_connection *c, struct client_state *st, const char *sid_h
   unsigned char iv[16];
   if (hex2bin(sid_hex, iv, sizeof(iv)) != 16) {
     printf("Bad SID length\n");
+    st->failed = st->done = true;
     return;
   }
 
   // Prepare "username:password" and encrypt with AES-128-CBC (zero pad)
   char creds[256];
-  snprintf(creds, sizeof(creds), "%s:%s", st->username, st->password);
+  if (snprintf(creds, sizeof(creds), "%s:%s", st->username, st->password) >= (int) sizeof(creds)) {
+    fprintf(stderr, "Credentials exceed client buffer size\n");
+    st->failed = st->done = true;
+    return;
+  }
 
   unsigned char *ct = NULL;
   size_t ct_len     = 0;
   if (aes128_cbc_zeropad_encrypt(st->key, iv, (const unsigned char *) creds, strlen(creds), &ct, &ct_len) != 0) {
     printf("AUTH encrypt failed\n");
+    st->failed = st->done = true;
     return;
   }
 
@@ -230,6 +231,8 @@ on_ws_msg(struct mg_connection *c, struct client_state *st, struct mg_ws_message
   struct mg_str s = wm->data;
   char *msg       = (char *) malloc(s.len + 1);
   if (!msg) {
+    fprintf(stderr, "Unable to allocate message buffer\n");
+    st->failed = st->done = true;
     return;
   }
 
@@ -245,21 +248,26 @@ on_ws_msg(struct mg_connection *c, struct client_state *st, struct mg_ws_message
 
   // Get command field
   char *command = mg_json_get_str(json, "$.command");
+  char *arg0 = mg_json_get_str(json, "$.args[0]");
 
-  // Check for AUTH0: {"type":"+","command":null,"args":["AUTH0","sid"]}
-  if (strcmp(type, "+") == 0 && command == NULL) {
-    // Get first arg
-    char *arg0 = mg_json_get_str(json, "$.args[0]" /*, NULL, 0*/);
-    if (strcmp(arg0, "AUTH0") == 0) {
-      // Get SID (second arg)
-      char *sid = mg_json_get_str(json, "$.args[1]");
-      if (sid) {
-        printf("Received AUTH0, SID: %s\n", sid);
-        handle_auth0(c, st, sid);
-      }
+  if (!type) {
+    fprintf(stderr, "Invalid WS2 message: missing type\n");
+    st->failed = st->done = true;
+  }
+  // Accept AUTH0 with or without an explicit command field.
+  else if (strcmp(type, "+") == 0 && arg0 && strcmp(arg0, "AUTH0") == 0) {
+    char *sid = mg_json_get_str(json, "$.args[1]");
+    if (sid) {
+      printf("Received AUTH0, SID: %s\n", sid);
+      handle_auth0(c, st, sid);
+      free(sid);
+    }
+    else {
+      fprintf(stderr, "Missing session ID in AUTH0\n");
+      st->failed = st->done = true;
     }
   }
-  else if (strcmp(type, "+") == 0 && strcmp(command, "AUTH") == 0) {
+  else if (strcmp(type, "+") == 0 && command && strcmp(command, "AUTH") == 0) {
     st->authenticated = true;
     printf("✓ Authenticated successfully\n");
 
@@ -273,24 +281,38 @@ on_ws_msg(struct mg_connection *c, struct client_state *st, struct mg_ws_message
       st->sent_open = true;
     }
   }
-  else if (strcmp(type, "+") == 0 && strcmp(command, "EVENT") == 0) {
+  else if (strcmp(type, "+") == 0 && command && strcmp(command, "OPEN") == 0) {
+    send_json(c, "{\"type\":\"EVENT\",\"event\":{\"head\":0,\"vscpClass\":30,\"vscpType\":5,"
+                 "\"obid\":0,\"datetime\":\"2026-01-01T00:00:00Z\",\"timestamp\":0,"
+                 "\"guid\":\"FF:FF:FF:FF:FF:FF:FF:F5:00:00:00:00:00:02:00:00\",\"data\":[1,2,3,4,5,6]}}");
+  }
+  else if (strcmp(type, "+") == 0 && command && strcmp(command, "CLOSE") == 0) {
+    st->done = true;
+  }
+  else if (strcmp(type, "+") == 0 && command && strcmp(command, "EVENT") == 0) {
     // Event
     printf("📬 Event sent\n");
+    st->event_sent = true;
   }
   else if (strcmp(type, "+") == 0) {
     // Success response
-    printf("✓ Success: %s\n", command);
+    printf("✓ Success: %s\n", command ? command : "(no command)");
   }
   else if (strcmp(type, "-") == 0) {
     // Error reply
-    printf("✗ Error reply: %s\n", command);
+    printf("✗ Error reply: %s\n", command ? command : "(no command)");
+    st->failed = st->done = true;
   }
-  else if (strcmp(type, "EVENT") == 0) {
+  else if (strcmp(type, "EVENT") == 0 || strcmp(type, "E") == 0) {
     // Event
     printf("📬 Event received %d\n", cnt++);
+    st->received_event = true;
     // Could parse event.vscpClass, event.vscpType, etc.
   }
 
+  free(arg0);
+  free(command);
+  free(type);
   free(msg);
 }
 
@@ -308,15 +330,18 @@ fn(struct mg_connection *c, int ev, void *ev_data)
       break;
     case MG_EV_ERROR:
       printf("MG_EV_ERROR: %s\n", (char *) ev_data);
+      st->failed = st->done = true;
       break;
     case MG_EV_WS_OPEN:
-      printf("✓ Connected to WS2 server: %s\n", WS_URL);
+      printf("✓ Connected to WS2 server: %s\n", st->url);
       break;
     case MG_EV_WS_MSG:
       on_ws_msg(c, st, (struct mg_ws_message *) ev_data);
       break;
     case MG_EV_CLOSE:
       printf("❌ Connection closed\n");
+      if (!st->done) st->failed = true;
+      st->done = true;
       break;
     default:
       break;
@@ -333,11 +358,17 @@ main(void)
   // Prepare client state
   struct client_state st;
   memset(&st, 0, sizeof(st));
-  st.username = USERNAME;
-  st.password = PASSWORD;
+  st.username = getenv("VSCP_USERNAME") ? getenv("VSCP_USERNAME") : USERNAME;
+  st.password = getenv("VSCP_PASSWORD") ? getenv("VSCP_PASSWORD") : PASSWORD;
+  st.url = getenv("VSCP_WS_URL") ? getenv("VSCP_WS_URL") : WS_URL;
+  const char *key = getenv("VSCP_KEY_HEX") ? getenv("VSCP_KEY_HEX") : VSCP_KEY_HEX;
 
-  if (hex2bin(VSCP_KEY_HEX, st.key, sizeof(st.key)) != 16) {
+  if (hex2bin(key, st.key, sizeof(st.key)) != 16) {
     fprintf(stderr, "Invalid VSCP key hex\n");
+    return 1;
+  }
+  if (mg_url_is_ssl(st.url)) {
+    fprintf(stderr, "This sample supports ws:// only; use the Python or JavaScript client for wss://.\n");
     return 1;
   }
 
@@ -345,51 +376,52 @@ main(void)
   mg_mgr_init(&mgr);
 
   // Connect as WebSocket client
-  struct mg_connection *c = mg_ws_connect(&mgr, WS_URL, fn, &st, NULL);
+  struct mg_connection *c = mg_ws_connect(&mgr, st.url, fn, &st, NULL);
   if (!c) {
-    fprintf(stderr, "Failed to connect to %s\n", WS_URL);
+    fprintf(stderr, "Failed to connect to %s\n", st.url);
     mg_mgr_free(&mgr);
     return 2;
   }
 
-  printf("Connecting to %s ...\n", WS_URL);
-
-  // After authentication, send an event after 3 seconds
-  uint64_t event_time = 0;
-  bool event_sent     = false;
+  printf("Connecting to %s ...\n", st.url);
+  signal(SIGINT, handle_signal);
+  signal(SIGTERM, handle_signal);
+  const uint64_t started = mg_millis();
+  const char *duration = getenv("VSCP_TEST_SECONDS");
+  char *end = NULL;
+  unsigned long seconds = duration ? strtoul(duration, &end, 10) : 0;
+  if (duration && (!*duration || *end || seconds > 3600)) {
+    fprintf(stderr, "VSCP_TEST_SECONDS must be an integer from 0 to 3600\n");
+    mg_mgr_free(&mgr);
+    return 1;
+  }
+  uint64_t closing = 0;
 
   // Poll loop (Ctrl+C to exit)
-  for (;;) {
+  while (!st.done) {
     mg_mgr_poll(&mgr, 100);
-
-    // Send test event 3 seconds after authentication
-    if (st.authenticated && !event_sent) {
-      if (event_time == 0) {
-        event_time = mg_millis();
-      }
-      else if (mg_millis() - event_time > 3000) {
-        printf("\n=== Sending test event ===\n");
-        const char *event_json = "{\"type\":\"EVENT\",\"event\":{"
-                                 "\"head\":0,"
-                                 "\"vscpClass\":30,"
-                                 "\"vscpType\":5,"
-                                 "\"obid\":0,"
-                                 "\"dateTime\":\"2025-01-01T00:00:00Z\","
-                                 "\"timestamp\":0,"
-                                 "\"guid\":\"FF:FF:FF:FF:FF:FF:FF:F5:00:00:00:00:00:02:00:00\","
-                                 "\"data\":[1,2,3,4,5,6],"
-                                 "\"note\":\"Test event from WS2 C client\""
-                                 "}}";
-        send_json(c, event_json);
-        event_sent = true;
-
-        // Send CLOSE command after 10 more seconds
-        mg_timer_add(&mgr, 10000, 0, sendClose, (void *) (uintptr_t) c);
-      }
+    if (st.done) break;
+    uint64_t now = mg_millis();
+    if (!st.authenticated && now - started > 10000) {
+      fprintf(stderr, "Authentication timed out\n");
+      st.failed = true;
+      break;
+    }
+    if (!closing && (stopped || (seconds && now - started >= seconds * 1000ULL))) {
+      send_json(c, "{\"type\":\"CMD\",\"command\":\"CLOSE\",\"args\":{}}");
+      closing = now;
+    }
+    if (closing && now - closing > 5000) {
+      fprintf(stderr, "CLOSE timed out\n");
+      st.failed = true;
+      break;
     }
   }
 
-  // Never reached
+  if (seconds && (!st.authenticated || !st.event_sent || !st.received_event)) {
+    fprintf(stderr, "Test did not complete authentication and bidirectional events\n");
+    st.failed = true;
+  }
   mg_mgr_free(&mgr);
-  return 0;
+  return st.failed ? 1 : 0;
 }

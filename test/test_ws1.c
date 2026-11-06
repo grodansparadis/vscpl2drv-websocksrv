@@ -16,6 +16,13 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <signal.h>
+#ifdef _WIN32
+#define strtok_r strtok_s
+#endif
+
+static volatile sig_atomic_t stopped = 0;
+static void handle_signal(int signal_number) { (void) signal_number; stopped = 1; }
 
 #define WS_URL   "ws://localhost:8884/ws1"
 #define USERNAME "admin"
@@ -30,6 +37,11 @@ struct client_state {
   const char *username;
   const char *password;
   bool sent_open;
+  bool done;
+  bool failed;
+  bool received_event;
+  bool event_sent;
+  const char *url;
 };
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -171,17 +183,23 @@ handle_auth0(struct mg_connection *c, struct client_state *st, const char *sid_h
   unsigned char iv[16];
   if (hex2bin(sid_hex, iv, sizeof(iv)) != 16) {
     printf("Bad SID length\n");
+    st->failed = st->done = true;
     return;
   }
 
   // Prepare "username:password" and encrypt with AES-128-CBC (zero pad)
   char creds[256];
-  snprintf(creds, sizeof(creds), "%s:%s", st->username, st->password);
+  if (snprintf(creds, sizeof(creds), "%s:%s", st->username, st->password) >= (int) sizeof(creds)) {
+    fprintf(stderr, "Credentials exceed client buffer size\n");
+    st->failed = st->done = true;
+    return;
+  }
 
   unsigned char *ct = NULL;
   size_t ct_len     = 0;
   if (aes128_cbc_zeropad_encrypt(st->key, iv, (const unsigned char *) creds, strlen(creds), &ct, &ct_len) != 0) {
     printf("AUTH encrypt failed\n");
+    st->failed = st->done = true;
     return;
   }
 
@@ -204,8 +222,11 @@ on_ws_msg(struct mg_connection *c, struct client_state *st, struct mg_ws_message
   // Convert to string
   struct mg_str s = wm->data;
   char *msg       = (char *) malloc(s.len + 1);
-  if (!msg)
+  if (!msg) {
+    fprintf(stderr, "Unable to allocate message buffer\n");
+    st->failed = st->done = true;
     return;
+  }
   memcpy(msg, s.buf, s.len);
   msg[s.len] = 0;
   printf("<< %s\n", msg);
@@ -233,14 +254,26 @@ on_ws_msg(struct mg_connection *c, struct client_state *st, struct mg_ws_message
         st->sent_open = true;
       }
     }
+    else if (strcmp(type, "+") == 0 && strcmp(cmd, "OPEN") == 0) {
+      send_text(c, "E;0,30,5,0,,0,FF:FF:FF:FF:FF:FF:FF:F5:00:00:00:00:00:02:00:00,1,2,3,4,5,6");
+    }
+    else if (strcmp(type, "+") == 0 && strcmp(cmd, "EVENT") == 0) {
+      st->event_sent = true;
+      printf("Event sent\n");
+    }
+    else if (strcmp(type, "+") == 0 && strcmp(cmd, "CLOSE") == 0) {
+      st->done = true;
+    }
     else if (strcmp(type, "-") == 0) {
       // Error reply
       printf("Error reply: %s\n", cmd);
+      st->failed = st->done = true;
     }
     else if (strcmp(type, "E") == 0) {
       // Event line (entire event is rest of string)
       // Example: E;head,class,type,obid,datetime,timestamp,guid,data...
       printf("Event: %s\n", (cmd ? cmd : ""));
+      st->received_event = true;
     }
   }
 
@@ -263,15 +296,18 @@ fn(struct mg_connection *c, int ev, void *ev_data)
 
     case MG_EV_ERROR:
       printf("MG_EV_ERROR: %s\n", (char *) ev_data);
+      st->failed = st->done = true;
       break;
     case MG_EV_WS_OPEN:
-      printf("WebSocket opened: %s\n", WS_URL);
+      printf("WebSocket opened: %s\n", st->url);
       break;
     case MG_EV_WS_MSG:
       on_ws_msg(c, st, (struct mg_ws_message *) ev_data);
       break;
     case MG_EV_CLOSE:
       printf("Connection closed\n");
+      if (!st->done) st->failed = true;
+      st->done = true;
       break;
     default:
       break;
@@ -288,11 +324,17 @@ main(void)
   // Prepare client state
   struct client_state st;
   memset(&st, 0, sizeof(st));
-  st.username = USERNAME;
-  st.password = PASSWORD;
+  st.username = getenv("VSCP_USERNAME") ? getenv("VSCP_USERNAME") : USERNAME;
+  st.password = getenv("VSCP_PASSWORD") ? getenv("VSCP_PASSWORD") : PASSWORD;
+  st.url = getenv("VSCP_WS_URL") ? getenv("VSCP_WS_URL") : WS_URL;
+  const char *key = getenv("VSCP_KEY_HEX") ? getenv("VSCP_KEY_HEX") : VSCP_KEY_HEX;
 
-  if (hex2bin(VSCP_KEY_HEX, st.key, sizeof(st.key)) != 16) {
+  if (hex2bin(key, st.key, sizeof(st.key)) != 16) {
     fprintf(stderr, "Invalid VSCP key hex\n");
+    return 1;
+  }
+  if (mg_url_is_ssl(st.url)) {
+    fprintf(stderr, "This sample supports ws:// only; use the Python or JavaScript client for wss://.\n");
     return 1;
   }
 
@@ -300,21 +342,52 @@ main(void)
   mg_mgr_init(&mgr);
 
   // Connect as WebSocket client
-  struct mg_connection *c = mg_ws_connect(&mgr, WS_URL, fn, &st, NULL);
+  struct mg_connection *c = mg_ws_connect(&mgr, st.url, fn, &st, NULL);
   if (!c) {
-    fprintf(stderr, "Failed to connect to %s\n", WS_URL);
+    fprintf(stderr, "Failed to connect to %s\n", st.url);
     mg_mgr_free(&mgr);
     return 2;
   }
 
-  printf("Connecting to %s ...\n", WS_URL);
+  printf("Connecting to %s ...\n", st.url);
+  signal(SIGINT, handle_signal);
+  signal(SIGTERM, handle_signal);
+  const uint64_t started = mg_millis();
+  const char *duration = getenv("VSCP_TEST_SECONDS");
+  char *end = NULL;
+  unsigned long seconds = duration ? strtoul(duration, &end, 10) : 0;
+  if (duration && (!*duration || *end || seconds > 3600)) {
+    fprintf(stderr, "VSCP_TEST_SECONDS must be an integer from 0 to 3600\n");
+    mg_mgr_free(&mgr);
+    return 1;
+  }
+  uint64_t closing = 0;
 
   // Poll loop (Ctrl+C to exit)
-  for (;;) {
+  while (!st.done) {
     mg_mgr_poll(&mgr, 100);
+    if (st.done) break;
+    uint64_t now = mg_millis();
+    if (!st.authenticated && now - started > 10000) {
+      fprintf(stderr, "Authentication timed out\n");
+      st.failed = true;
+      break;
+    }
+    if (!closing && (stopped || (seconds && now - started >= seconds * 1000ULL))) {
+      send_text(c, "C;CLOSE");
+      closing = now;
+    }
+    if (closing && now - closing > 5000) {
+      fprintf(stderr, "CLOSE timed out\n");
+      st.failed = true;
+      break;
+    }
   }
 
-  // Never reached
+  if (seconds && (!st.authenticated || !st.event_sent || !st.received_event)) {
+    fprintf(stderr, "Test did not complete authentication and bidirectional events\n");
+    st.failed = true;
+  }
   mg_mgr_free(&mgr);
-  return 0;
+  return st.failed ? 1 : 0;
 }

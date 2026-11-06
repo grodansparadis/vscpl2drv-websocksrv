@@ -7,6 +7,7 @@ sudo apt install build-essential
 sudo apt install cmake
 sudo apt install libexpat-dev
 sudo apt install libssl-dev
+sudo apt install libsodium-dev
 sudo apt install rpm (comment: only if you want to create rpm install packages)
 cd vscpl2drv-websocksrv
 mkdir build
@@ -23,106 +24,108 @@ Install of _pandoc_ is only needed if man pages should be rebuilt. This is norma
 
 ## Build from source on Windows
 
-### You need a compiler
+### Prerequisites
 
-The Visual Studio Community Edition is a free IDE from Microsoft. Download and install it from [here](https://visualstudio.microsoft.com/vs/community/).
+Install Visual Studio 2022 with the **Desktop development with C++** workload,
+including the Windows SDK, and install Git and CMake. Use a Visual Studio
+Developer PowerShell or x64 Native Tools command prompt for the commands below.
 
-### Install Pandoc
-Pandoc is used to build the man pages. Download and install it from [here](https://pandoc.org/installing.html).
+Pandoc is optional and is only needed when regenerating manual pages. NSIS is
+optional and is only needed to create an installer.
 
-### Install the vcpkg package manager
+### Install dependencies with vcpkg
 
-You need the vcpkg package manager on windows. Install it with
+Clone and bootstrap vcpkg:
 
-```bash
-git clone https://github.com/microsoft/vcpkg.git
+```powershell
+git clone https://github.com/microsoft/vcpkg.git C:\src\vcpkg
+cd C:\src\vcpkg
+.\bootstrap-vcpkg.bat
 ```
 
-then go into the folder
+Install the libraries required by the driver:
 
-```bash
-cd vcpkg
+```powershell
+.\vcpkg.exe install expat:x64-windows openssl:x64-windows pthreads:x64-windows dlfcn-win32:x64-windows libsodium:x64-windows
 ```
 
-Run the vcpkg bootstrapper command
+See Microsoft's documentation for [vcpkg](https://learn.microsoft.com/en-us/vcpkg/)
+and [CMake integration](https://learn.microsoft.com/en-us/vcpkg/users/buildsystems/cmake-integration).
 
-```bash
-bootstrap-vcpkg.bat
-```
+### Configure and build
 
-The process is described in detail [here](https://docs.microsoft.com/en-us/cpp/build/install-vcpkg?view=msvc-160&tabs=windows)
+Clone the source and configure CMake with the vcpkg toolchain. Adjust the
+toolchain path if vcpkg is installed elsewhere:
 
-To [integrate with Visual Studio](https://docs.microsoft.com/en-us/cpp/build/integrate-vcpkg?view=msvc-160) run
-
-```bash
-vcpkg integrate install
-```
-
-Install the required libs
-
-```bash
-vcpkg install pthread:x64-windows
-vcpkg install expat:x64-windows
-vcpkg install openssl:x64-windows
-vcpkg install dlfcn-win32:x64-windows
-```
-
-Full usage is describe [here](https://docs.microsoft.com/en-us/cpp/build/manage-libraries-with-vcpkg?view=msvc-160&tabs=windows)
-
-### Get the source for the driver
-
-```bash
-git clone --recursive https://github.com/grodansparadis/vscpl2drv-websocksrv.git
-```
-
-### Build the driver
-
-Build as usual but use
-
-```bash
+```powershell
+git clone https://github.com/grodansparadis/vscpl2drv-websocksrv.git
 cd vscpl2drv-websocksrv
-mkdir build
+cmake -S . -B build `
+  -DCMAKE_TOOLCHAIN_FILE=C:/src/vcpkg/scripts/buildsystems/vcpkg.cmake `
+  -DVCPKG_TARGET_TRIPLET=x64-windows `
+  -A x64
+cmake --build build --config Release --parallel
+```
+
+Use `--config Debug` to build a debug configuration. With the Visual Studio
+generator, the build configuration is selected at build time (not with
+`CMAKE_BUILD_TYPE`). The DLL and test app are placed in the configuration's
+build output directories.
+
+### Create Windows packages
+
+Run CPack from the build directory. ZIP archives can be generated without
+NSIS; install NSIS to create an executable installer:
+
+```powershell
 cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release -DVCPKG_ROOT=G:/vcpkg/ -DCMAKE_TOOLCHAIN_FILE=G:/vcpkg/scripts/buildsystems/vcpkg.cmake -G "Visual Studio 17 2022" -A x64
+cpack -G ZIP .
+cpack -G NSIS .
 ```
 
-The **CMAKE_TOOLCHAIN_FILE** path may be different in your case
+## Build driver from source on MacOS
 
-Note that *Release|Debug* should be either `Release` or `Debug`
+### Prerequisites
 
-The windows build files can now be found in the build folder and all needed files to run the project can  after build - be found in build/release or build/Debug depending on CMAKE_BUILD_TYPE setting.
-
-Building and configuration is simplified with VS Code installed. Configure/build/run can be done (se lower toolbar). Using VS Code it may be useful to add
-
-```json
-"cmake.configureSettings": {
-   "CMAKE_BUILD_TYPE": "${buildType}"
-}
-``` 
-
-to your `settings.json` file.
-
-To build at the command prompt use
+Install Apple's Xcode Command Line Tools and Homebrew, then install CMake and
+the required libraries:
 
 ```bash
-cmake --build . --config Release
+xcode-select --install
+brew install cmake expat libsodium openssl
 ```
 
-Note that you must have a *developer command prompt*
+Pandoc is optional and is only needed when regenerating manual pages.
 
-### Build deploy packages 
+### Configure and build
 
-Install NSIS from [this site](https://sourceforge.net/projects/nsis/).
-
-Run 
+Clone the repository and configure it with Homebrew's OpenSSL location. CMake
+fetches the VSCP, Mongoose, spdlog, and nlohmann JSON sources as part of the
+configure step, so a recursive submodule checkout is not required.
 
 ```bash
-cpack ..
+git clone https://github.com/grodansparadis/vscpl2drv-websocksrv.git
+cd vscpl2drv-websocksrv
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DOPENSSL_ROOT_DIR="$(brew --prefix openssl)" \
+  -DCMAKE_PREFIX_PATH="$(brew --prefix)"
+cmake --build build --config Release --parallel
 ```
- 
-in the build folder.
 
-## How to build the driver from source on MacOS
-t.b.d.
+The driver library and test app are written to the `build` directory. To
+produce the available macOS packages:
+
+```bash
+cd build
+cpack -G TGZ .
+cpack -G DragNDrop .
+```
+
+If installing the library manually, copy the resulting `.dylib` to the
+directory used by your VSCP host for Level II drivers. Configure the host with
+the full library path and the driver configuration path. See
+[Install the driver on MacOS](./install.md#install-the-driver-on-macos) and
+[Configure the driver](./configure.md).
 
 [filename](./bottom-copyright.md ':include')

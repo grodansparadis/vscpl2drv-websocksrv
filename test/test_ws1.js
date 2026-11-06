@@ -4,11 +4,11 @@ const {
 } = require('node:crypto');
 
 // Configuration
-const WS_URL = 'ws://localhost:8884/ws1';
+const WS_URL = process.env.VSCP_WS_URL || 'ws://localhost:8884/ws1';
 const algorithm = 'aes-128-cbc';
-const key = Buffer.from('2DBB079A38985AF00EBEEFE22F9FFA0E', 'hex');
-const username = 'admin';
-const password = 'secret';
+const key = Buffer.from(process.env.VSCP_KEY_HEX || '2DBB079A38985AF00EBEEFE22F9FFA0E', 'hex');
+const username = process.env.VSCP_USERNAME || 'admin';
+const password = process.env.VSCP_PASSWORD || 'secret';
 
 class VSCPWebSocketClient {
   constructor(url) {
@@ -29,7 +29,7 @@ class VSCPWebSocketClient {
                       perMessageDeflate: false
                 });
 
-      // Wait for AUTH0
+      // Resolve only after the server accepts authentication.
       this.waitForAuth().then(resolve).catch(reject);          
 
       this.ws.on('open', () => {
@@ -38,8 +38,14 @@ class VSCPWebSocketClient {
       });
 
       this.ws.on('message', (data) => {
-        //console.log('📩 Message received (raw):', data.toString()); // Debug
-        this.handleMessage(data);
+        try {
+          this.handleMessage(data);
+        } catch (error) {
+          console.error('Message handling failed:', error.message);
+          process.exitCode = 1;
+          this.ws.close();
+          reject(error);
+        }
       });
 
       this.ws.on('error', (error) => {
@@ -57,19 +63,25 @@ class VSCPWebSocketClient {
   }
 
   /**
-   * Wait for AUTH0 message from server
+   * Wait for authentication success or rejection
    */
   waitForAuth() {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error('Authentication timeout - no AUTH0 received'));
+        this.authResolver = null;
+        reject(new Error('Authentication timeout - no AUTH1 received'));
       }, 5000);
 
       this.authResolver = (response) => {
-        if (response.type === '+' && response.command === 'AUTH0') {
+        if (response.type === '+' && response.command === 'AUTH1') {
           clearTimeout(timeout);
           this.authResolver = null;
+          this.authenticated = true;
           resolve(response);
+        } else if (response.type === '-' && response.command === 'AUTH') {
+          clearTimeout(timeout);
+          this.authResolver = null;
+          reject(new Error(`Authentication rejected: ${response.raw}`));
         }
       };
     });
@@ -115,7 +127,7 @@ class VSCPWebSocketClient {
     console.log('   Type:', response.type, 'Command:', response.command);
     console.log('   Params:', response.params);
 
-    // Call auth resolver if waiting for AUTH0
+    // Resolve the connection only after AUTH1.
     if (this.authResolver) {
       this.authResolver(response);
     }
@@ -142,23 +154,19 @@ class VSCPWebSocketClient {
   /**
    * Authenticate with server
    */
-  async authenticate(iv) {
+  authenticate(iv) {
     try {
       const ivBuffer = Buffer.from(iv, 'hex');
       
       console.log('  IV:', ivBuffer.toString('hex'));
-      console.log('  Key:', key.toString('hex'));
 
       const cipher = createCipheriv(algorithm, key, ivBuffer);
       cipher.setAutoPadding(false);
 
-      const credentials = `${username}:${password}`;
-      let encrypted = cipher.update(credentials, 'utf8', 'hex');
-      
-      // Pad to block size (16 bytes)
-      const paddingLength = 16 - (credentials.length % 16);
-      encrypted += cipher.update('\0'.repeat(paddingLength), 'utf8', 'hex');
-      encrypted += cipher.final('hex');
+      const credentials = Buffer.from(`${username}:${password}`, 'utf8');
+      const padded = Buffer.alloc(Math.ceil(credentials.length / 16) * 16);
+      credentials.copy(padded);
+      const encrypted = Buffer.concat([cipher.update(padded), cipher.final()]).toString('hex');
 
       console.log('  Encrypted:', encrypted.toUpperCase());
 
@@ -197,7 +205,8 @@ class VSCPWebSocketClient {
       throw new Error('WebSocket is not open');
     }
 
-    const fullCommand = command.startsWith('C;') ? command : `C;${command}`;
+    const fullCommand = /^(C|E);/.test(command) ? command : `C;${command}`;
+    const expected = command.startsWith('E;') ? 'EVENT' : command.replace(/^C;/, '').split(';')[0];
     
     console.log('\n📤 Sending:', fullCommand);
 
@@ -212,10 +221,12 @@ class VSCPWebSocketClient {
           const response = this.parseMessage(data);
           
           // Check if this is a response (not an event)
-          if (response.type === '+' || response.type === '-') {
+          if ((response.type === '+' || response.type === '-') &&
+              response.command === expected) {
             clearTimeout(timeoutId);
             this.ws.removeListener('message', handler.fn);
-            resolve(response);
+            if (response.type === '-') reject(new Error(`Command rejected: ${response.raw}`));
+            else resolve(response);
           }
         },
         remove: () => {
@@ -233,8 +244,7 @@ class VSCPWebSocketClient {
    */
   send(message) {
     if (!this.isOpen) {
-      console.error('Cannot send - WebSocket is not open');
-      return;
+      throw new Error('Cannot send - WebSocket is not open');
     }
     this.ws.send(message);
   }
@@ -280,14 +290,14 @@ class VSCPWebSocketClient {
   async sendEvent(head, vscpClass, vscpType, guid, data = []) {
     const now = new Date().toISOString();
     const eventStr = `E;${head},${vscpClass},${vscpType},0,${now},0,${guid},${data.join(',')}`;
-    this.send(eventStr);
+    return this.sendCommand(eventStr);
   }
 
   /**
    * Close WebSocket connection
    */
   async close() {
-    if (this.ws && this.isOpen) {
+    if (this.ws) {
       this.ws.close();
       this.isOpen = false;
       console.log('✓ Connection closed');
@@ -302,10 +312,7 @@ async function main() {
   try {
     // Connect and authenticate
     await client.connect();
-    console.log('Connection established and AUTH0 received');
-
-    // Wait a bit for authentication to complete
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log('Connection established and authenticated');
 
     if (!client.authenticated) {
       throw new Error('Authentication did not complete');
@@ -326,6 +333,8 @@ async function main() {
     console.log('COPYRIGHT response:', copyrightResp);
     await new Promise(resolve => setTimeout(resolve, 500));
 
+    console.log('CLEAR QUEUE response:', await client.sendCommand('CLRQ'));
+
     // Open channel
     const openResp = await client.open();
     console.log('OPEN response:', openResp);
@@ -339,7 +348,8 @@ async function main() {
       'FF:FF:FF:FF:FF:FF:FF:F5:00:00:00:00:00:02:00:00',
       [1, 2, 3, 4, 5, 6]
     );
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Keep the channel open long enough to receive demonstration events.
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     // Close channel
     const closeResp = await client.closeChannel();

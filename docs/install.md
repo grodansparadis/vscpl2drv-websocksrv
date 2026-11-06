@@ -18,9 +18,47 @@ If you need to do dynamic configuration a good place to put the file is in the *
 A sample configuration file is make available in */usr/share/vscpl2drv-websocksrv.so* after installation.
 
 ## Install the driver on Windows
-In the release section of this site you can find binary files for windows that will install the file for you or unpack a binary that you can copy to the location of choice yourself.
+
+Download the Windows package from the project's
+[GitHub Releases](https://github.com/grodansparadis/vscpl2drv-websocksrv/releases)
+page. Depending on the release, packages may include an NSIS installer (`.exe`)
+and a portable ZIP archive.
+
+- Run the installer and follow its prompts, or extract the ZIP to a folder
+  accessible to the VSCP host application.
+- Keep the driver DLL and its runtime dependency DLLs together in the installed
+  folder, or ensure those dependencies are available on `PATH`.
+- Create a driver configuration JSON file and a separate user JSON file. See
+  [Configure the driver](./configure.md) for the formats and required paths.
+- Add a Level II driver entry to the VSCP daemon or other host application,
+  pointing `path-driver` to the installed driver DLL and `path-config` to the
+  driver configuration file. See the host application's documentation for
+  registration details.
+
+If no Windows binary package is available for your release, build the driver
+from source using the [Windows build instructions](./build.md#build-from-source-on-windows).
 
 ## Install the driver on MacOS
-t.b.d.
+
+Download the macOS package from the project's
+[GitHub Releases](https://github.com/grodansparadis/vscpl2drv-websocksrv/releases)
+page, if one is published for your macOS version and CPU architecture. Releases
+may provide a disk image (`.dmg`) or a compressed archive (`.tgz`).
+
+Open the disk image or extract the archive, then copy the driver library
+(`.dylib`) to a directory readable by the VSCP host application. If the release
+does not include a macOS package, build the library using the
+[macOS build instructions](./build.md#build-driver-from-source-on-macos).
+
+The driver depends on Expat, OpenSSL, and libsodium. If these libraries are not
+bundled with the release, install compatible runtime libraries for your
+architecture (for example, with Homebrew) and ensure the host process can find
+them.
+
+Create a driver configuration file and a separate user JSON file, then
+configure your VSCP host application to load the `.dylib` and pass the driver
+configuration path. See [Configure the driver](./configure.md) and the host
+application's documentation. Preserve the package's directory layout if it
+contains runtime dependencies or sample files.
 
 [filename](./bottom-copyright.md ':include')

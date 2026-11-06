@@ -1,25 +1,18 @@
-project(test)
+cmake_minimum_required(VERSION 3.10)
+project(websocket-test-clients LANGUAGES C)
 
-# Create the executable
-add_executable(${PROJECT_NAME} test.c
-                      ../third-party/vscp-firmware/common/vscp-firmware-helper.c
-                      ../third-party/vscp-firmware/common/vscp-aes.c
-                      ../third-party/vscp-firmware/common/crc.c)
+find_package(OpenSSL REQUIRED)
+find_package(Threads REQUIRED)
 
-include_directories(
-  .
-  ..
-  ../third-party/vscp-firmware/common/
-)
+add_library(test-mongoose STATIC mongoose.c)
+target_include_directories(test-mongoose PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(test-mongoose PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+if(WIN32)
+  target_link_libraries(test-mongoose PUBLIC ws2_32)
+endif()
 
-target_link_libraries(${PROJECT_NAME}
-    m
-)
-
-# Link the static library from subproject1 using its alias sub::lib1
-# Link the header only library from subproject2 using its alias sub::lib2
-# This will cause the include directories for that target to be added to this project
-#target_link_libraries(${PROJECT_NAME}
-#    sub::lib1
-#    sub::lib2
-#)
+foreach(PROTOCOL ws1 ws2)
+  add_executable(test_${PROTOCOL} test_${PROTOCOL}.c)
+  target_compile_features(test_${PROTOCOL} PRIVATE c_std_99)
+  target_link_libraries(test_${PROTOCOL} PRIVATE test-mongoose OpenSSL::Crypto)
+endforeach()

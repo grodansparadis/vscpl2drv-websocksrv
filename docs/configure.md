@@ -84,13 +84,26 @@ The URL part of the VSCP webSocket ws2 interface. Default is `/ws2`
 Path to the folder with static web content to be served if `enable-static` is set to true.  
 
 ## key-file
-Pointer to a file that holds the private key for the communication. This is used to authenticate the server to connecting clients. The file should hold a HEX string that is at least 16 bytes long. A good way to generate such a key is to use the command line tool _openssl_ like this
+Path to the shared AES key used to encrypt the WebSocket authentication
+credentials. This is separate from the TLS private key and the users' Argon2id
+password hashes. The client and server must use the same AES key.
+
+The file must contain at least 32 hexadecimal characters (16 bytes), optionally
+followed by a newline. Generate a key with:
 
 ```bash
 openssl rand -hex 16 > /etc/vscp/vscp.key
 ``` 
 
-The file can be longer then 16 bytes so it is useful for stronger encryption. The extra bytes will be ignored here.
+Only the first 16 bytes are used for AES-128 authentication; extra key bytes do
+not increase its encryption strength. An unreadable or invalid configured key
+file prevents startup.
+
+If `key-file` is omitted, the server uses
+`2DBB079A38985AF00EBEEFE22F9FFA0E`, matching the sample clients. This public
+default is for local testing only. Configure a private key and use TLS for
+deployment. A key mismatch can cause login to fail even with a correct username
+and password.
 
 ## interface
 Set the interface to listen on. Default is: *ws://localhost:8884*. The interface is either secure using prefix `wss` (TLS) or insecure using prefix `ws`. It is not possible to define interfaces that accept connections of both types.
@@ -120,7 +133,11 @@ All values can be give in decimal or hexadecimal (preceded number with '0x'). GU
 ## TLS/SSL
 Settings for TLS (Transport Layer Security), SSL.  
 
-It is important to understand that if used in an open environment like the internet it is not secure. People listening on the traffic can see both data and username/password credentials. It is therefore important to use the driver in a controlled environment and as early as possible move the flow of events to a secure environment with TLS activated. This is often not a problem in a local cable based environment but is definitely a problem using wireless transmission that lack encryption.
+When `interface` uses `ws://`, the connection is not encrypted: network
+observers can read authentication traffic and VSCP events. Use `wss://` with a
+trusted server certificate whenever the connection crosses an untrusted
+network. See the [security considerations](./security.md) and the
+[self-signed certificate guide](./self_signed_server_certificates.md).
 
 ### Certificates overview
 

@@ -27,26 +27,24 @@
 /*
     YEAR is the release year,
     MONTH is the release month,
-    RELEASE is the patch number.
-    BUILD identifies a build of that release.
+    PATCH is the patch number.
 */
 // I M P O T A N T ! ! ! Lines below must be located at line
 // 35/36/37/38/40/42/43 I M P O T A N T ! ! !
 #define VSCPL2DRV_WEBSOCKSRV_MAJOR_VERSION     2026
-#define VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION     10
-#define VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION   0
-#define VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION     0
+#define VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION     11
+#define VSCPL2DRV_WEBSOCKSRV_PATCH_VERSION   1
 
-#define VSCPL2DRV_WEBSOCKSRV_DISPLAY_VERSION   "2026.10.0"
+#define VSCPL2DRV_WEBSOCKSRV_DISPLAY_VERSION   "2026.11.1"
 
 #define VSCPL2DRV_WEBSOCKSRV_COPYRIGHT                                      \
-    "Copyright (C) 2000-2026 Ake Hedman, the VSCP project, "                \
+    "Copyright (C) 2000-2026 Ake Hedman and contributors, the VSCP project, "                \
     "https://www.vscp.org"
 #define VSCPL2DRV_WEBSOCKSRV_COPYRIGHT_HTML                                 \
-    "Copyright (C) 2000-2026 Ake Hedman, <a "                               \
+    "Copyright (C) 2000-2026 Ake Hedman and contributors, <a "                               \
     "href=\"mailto:info@vscp.org\">the VSCP project</a>, <a "               \
     "href=\"https://www.vscp.org\">https://"                                \
-    "www.grodansparadis.com</a>"
+    "www.vscp.org</a>"
 
 #define MAKE_VSCPL2DRV_WEBSOCKSRV_VERSION(major, minor, release)            \
     (((major) << 16) | ((minor) << 8) | (release))

@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.parse_version.outputs.version }}
+      version_short: ${{ steps.parse_version.outputs.version_short }}
       version_major: ${{ steps.parse_version.outputs.version_major }}
       version_minor: ${{ steps.parse_version.outputs.version_minor }}
       version_patch: ${{ steps.parse_version.outputs.version_patch }}
-      version_build: ${{ steps.parse_version.outputs.version_build }}
     steps:
     - name: Checkout main repository
       uses: actions/checkout@v4
@@ -37,20 +37,19 @@ jobs:
         cat "$VERSION_FILE"
         
         # Extract version components
-        VERSION_MAJOR=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_MAJOR_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_VERSION\s+([0-9]+).*/\1/')
-        VERSION_MINOR=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION\s+([0-9]+).*/\1/')
-        VERSION_PATCH=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_RELEASE_VERSION\s+([0-9]+).*/\1/')
-        VERSION_BUILD=$(grep -E "#define\s+VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION\s+" "$VERSION_FILE" | sed -E 's/.*#define\s+VSCPL2DRV_WEBSOCKSRV_BUILD_VERSION\s+([0-9]+).*/\1/')
+        VERSION_MAJOR=$(sed -nE 's/^#define[[:space:]]+VSCPL2DRV_WEBSOCKSRV_MAJOR_VERSION[[:space:]]+([0-9]+).*$/\1/p' "$VERSION_FILE")
+        VERSION_MINOR=$(sed -nE 's/^#define[[:space:]]+VSCPL2DRV_WEBSOCKSRV_MINOR_VERSION[[:space:]]+([0-9]+).*$/\1/p' "$VERSION_FILE")
+        VERSION_PATCH=$(sed -nE 's/^#define[[:space:]]+VSCPL2DRV_WEBSOCKSRV_PATCH_VERSION[[:space:]]+([0-9]+).*$/\1/p' "$VERSION_FILE")
         
         # Validate extracted values
-        if [ -z "$VERSION_MAJOR" ] || [ -z "$VERSION_MINOR" ] || [ -z "$VERSION_PATCH" ] || [ -z "$VERSION_BUILD" ]; then
+        if [ -z "$VERSION_MAJOR" ] || [ -z "$VERSION_MINOR" ] || [ -z "$VERSION_PATCH" ]; then
           echo "Error: Failed to extract version components"
-          echo "Major: '$VERSION_MAJOR', Minor: '$VERSION_MINOR', Patch: '$VERSION_PATCH', Build: '$VERSION_BUILD'"
+          echo "Major: '$VERSION_MAJOR', Minor: '$VERSION_MINOR', Patch: '$VERSION_PATCH'"
           exit 1
         fi
         
         # Construct version string
-        VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}.${VERSION_BUILD}"
+        VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
         VERSION_SHORT="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
         
         echo "Extracted version: $VERSION"
@@ -62,7 +61,6 @@ jobs:
         echo "version_major=$VERSION_MAJOR" >> $GITHUB_OUTPUT
         echo "version_minor=$VERSION_MINOR" >> $GITHUB_OUTPUT
         echo "version_patch=$VERSION_PATCH" >> $GITHUB_OUTPUT
-        echo "version_build=$VERSION_BUILD" >> $GITHUB_OUTPUT
         
         # Also set as environment variables for later jobs
         echo "PROJECT_VERSION=$VERSION" >> $GITHUB_ENV
@@ -112,7 +110,6 @@ jobs:
         echo "  Major: ${{ needs.version.outputs.version_major }}"
         echo "  Minor: ${{ needs.version.outputs.version_minor }}"
         echo "  Patch: ${{ needs.version.outputs.version_patch }}"
-        echo "  Build: ${{ needs.version.outputs.version_build }}"
 
     # Setup Visual Studio environment properly for Windows
     - name: Setup MSBuild and Visual Studio (Windows)
@@ -135,7 +132,7 @@ jobs:
         git clone https://github.com/Microsoft/vcpkg.git
         cd vcpkg
         .\bootstrap-vcpkg.bat
-        .\vcpkg.exe install expat:x64-windows openssl:x64-windows pthreads:x64-windows dlfcn-win32:x64-windows
+        .\vcpkg.exe install expat:x64-windows openssl:x64-windows pthreads:x64-windows dlfcn-win32:x64-windows libsodium:x64-windows
         $vcpkgRoot = "${{ github.workspace }}\vcpkg"
         $toolchainFile = "$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
         echo "VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
@@ -262,14 +259,14 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libexpat1-dev libssl-dev pandoc
+        sudo apt-get install -y libexpat1-dev libssl-dev libsodium-dev pandoc
 
     # macOS dependencies
     - name: Install macOS dependencies
       if: runner.os == 'macOS'
       run: |
         brew update
-        brew install openssl expat pandoc pkg-config
+        brew install openssl expat libsodium pandoc pkg-config
         echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
         echo "EXPAT_ROOT_DIR=$(brew --prefix expat)" >> $GITHUB_ENV
         echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl):$(brew --prefix expat):$(brew --prefix)" >> $GITHUB_ENV
@@ -588,21 +585,78 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: vscpl2drv-websocksrv-${{ needs.version.outputs.version }}-${{ matrix.os }}
+        name: vscpl2drv-websocksrv-${{ needs.version.outputs.version_short }}-${{ matrix.os }}-${{ matrix.triplet }}
         path: |
-          ${{github.workspace}}/build/*.deb
-          ${{github.workspace}}/build/*.rpm
-          ${{github.workspace}}/build/*.tar.gz
-          ${{github.workspace}}/build/*.tgz
-          ${{github.workspace}}/build/*.dmg
-          ${{github.workspace}}/build/*.exe
-          ${{github.workspace}}/build/*.zip
+          ${{github.workspace}}/build/**/*.so
+          ${{github.workspace}}/build/**/*.dylib
+          ${{github.workspace}}/build/**/*.dll
+          ${{github.workspace}}/build/**/*.exe
+          ${{github.workspace}}/build/**/*.deb
+          ${{github.workspace}}/build/**/*.rpm
+          ${{github.workspace}}/build/**/*.tar.gz
+          ${{github.workspace}}/build/**/*.tgz
+          ${{github.workspace}}/build/**/*.dmg
+          ${{github.workspace}}/build/**/*.zip
         retention-days: 30
+        if-no-files-found: error
+
+  raspberry-pi:
+    needs: version
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: raspberry-pi-32
+            platform: linux/arm/v7
+          - name: raspberry-pi-64
+            platform: linux/arm64/v8
+
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v4
+
+    - name: Enable ARM emulation
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm,arm64
+
+    - name: Build for ${{ matrix.name }}
+      shell: bash
+      run: |
+        docker run --rm \
+          --platform "${{ matrix.platform }}" \
+          --volume "${GITHUB_WORKSPACE}:/workspace" \
+          --workdir /workspace \
+          ubuntu:24.04 \
+          bash -euc '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              build-essential cmake git pkg-config \
+              libexpat1-dev libssl-dev libsodium-dev
+            cmake -S . -B build-rpi \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX=/usr
+            cmake --build build-rpi --config Release --parallel 2
+          '
+
+    - name: Upload Raspberry Pi artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: vscpl2drv-websocksrv-${{ needs.version.outputs.version_short }}-${{ matrix.name }}
+        path: |
+          ${{ github.workspace }}/build-rpi/**/*.so
+          ${{ github.workspace }}/build-rpi/**/*.dylib
+          ${{ github.workspace }}/build-rpi/**/*.dll
+          ${{ github.workspace }}/build-rpi/**/*.exe
+        retention-days: 30
+        if-no-files-found: error
 
   # Release job (only on tags)
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [version, build]
+    needs: [version, build, raspberry-pi]
     runs-on: ubuntu-latest
     steps:
     - name: Download all artifacts

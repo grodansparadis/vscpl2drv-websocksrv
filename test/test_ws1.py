@@ -7,16 +7,16 @@
 
 
 
-import ssl
+import os
 import time
 import websocket
 from Crypto.Cipher import AES
 
-WS_URL = 'ws://localhost:8884/ws1'   # or wss://...
-USERNAME = 'admin'
-PASSWORD = 'secret'
+WS_URL = os.environ.get('VSCP_WS_URL', 'ws://localhost:8884/ws1')
+USERNAME = os.environ.get('VSCP_USERNAME', 'admin')
+PASSWORD = os.environ.get('VSCP_PASSWORD', 'secret')
 # 16-byte shared key in hex (AES-128)
-VSCP_KEY_HEX = '2DBB079A38985AF00EBEEFE22F9FFA0E'
+VSCP_KEY_HEX = os.environ.get('VSCP_KEY_HEX', '2DBB079A38985AF00EBEEFE22F9FFA0E')
 
 def zero_pad(b: bytes, block=16) -> bytes:
     # Zero padding to 16-byte boundary (no extra block if already aligned)
@@ -33,10 +33,10 @@ def parse_msg(text: str):
         'params': parts[2:] if len(parts) > 2 else []
     }
 
-def recv_until_response(ws, timeout=10.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        ws.settimeout(max(0.1, deadline - time.time()))
+def recv_until_response(ws, timeout=10.0, command=None):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        ws.settimeout(max(0.1, deadline - time.monotonic()))
         data = ws.recv()
         if isinstance(data, bytes):
             data = data.decode('utf-8', errors='replace')
@@ -47,7 +47,10 @@ def recv_until_response(ws, timeout=10.0):
             continue
         # Return on any response (+/-)
         if msg['type'] in ('+', '-'):
-            return msg
+            if msg['type'] == '-':
+                raise RuntimeError(f'Server rejected request: {msg["raw"]}')
+            if command is None or msg['cmd'] == command:
+                return msg
         # Other lines (ignore/print)
         print(f'Recv: {msg["raw"]}')
     raise TimeoutError('Timed out waiting for response')
@@ -59,23 +62,26 @@ def send(ws, line: str):
 def send_command(ws, command: str, timeout=5.0):
     full = command if command.startswith('C;') else f'C;{command}'
     send(ws, full)
-    return recv_until_response(ws, timeout)
+    return recv_until_response(ws, timeout, command.removeprefix('C;').split(';')[0])
 
 def send_event(ws, head, vscp_class, vscp_type, guid, data=None):
     if data is None:
         data = []
     # E;head,class,type,obid,datetime,timestamp,guid,data...
     # Keep datetime/timestamp simple for demo
-    line = f'E;{head},{vscp_class},{vscp_type},0,0,0,{guid},{",".join(map(str, data))}'
+    line = f'E;{head},{vscp_class},{vscp_type},0,,0,{guid},{",".join(map(str, data))}'
     send(ws, line)
+    return recv_until_response(ws, command='EVENT')
 
 def main():
-    sslopt = None
-    if WS_URL.startswith('wss://'):
-        # For self-signed testing, disable verification (NOT for production)
-        sslopt = {"cert_reqs": ssl.CERT_NONE}
+    ws = websocket.create_connection(WS_URL, timeout=5)
+    try:
+        run_session(ws)
+    finally:
+        ws.close()
+    print('Closed')
 
-    ws = websocket.create_connection(WS_URL, timeout=5, sslopt=sslopt)
+def run_session(ws):
     print('Connected')
 
     # 1) Wait for AUTH0
@@ -120,20 +126,20 @@ def main():
         data=[1, 2, 3, 4, 5, 6]
     )
 
-    # 6) Read a few incoming frames (events/responses)
-    try:
-        for _ in range(5):
+    # Listen for a bounded interval, even when events arrive continuously.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        ws.settimeout(max(0.1, deadline - time.monotonic()))
+        try:
             msg = ws.recv()
-            if isinstance(msg, bytes):
-                msg = msg.decode('utf-8', errors='replace')
-            print('Recv:', msg)
-    except Exception as e:
-        print('Read error:', e)
+        except websocket.WebSocketTimeoutException:
+            break
+        if not msg:
+            raise ConnectionError('Server closed the connection')
+        print('Recv:', msg)
 
     # 7) Close channel and connection
     print('CLOSE:', send_command(ws, 'CLOSE'))
-    ws.close()
-    print('Closed')
 
 if __name__ == '__main__':
     main()
