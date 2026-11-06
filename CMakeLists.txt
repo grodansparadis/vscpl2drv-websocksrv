@@ -378,6 +378,7 @@ if (WIN32)
     OpenSSL::Crypto
     OpenSSL::SSL OpenSSL::Crypto
     vscp-common
+    expat::expat
     ${SODIUM_LIBRARY}
   )
         
@@ -389,6 +390,7 @@ else()
     OpenSSL::SSL 
     OpenSSL::Crypto
     vscp-common
+    ${EXPAT_LIBRARIES}
     ${SODIUM_LIBRARY}
   )
 endif()
