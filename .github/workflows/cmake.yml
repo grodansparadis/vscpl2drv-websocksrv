@@ -20,13 +20,6 @@ jobs:
         repository: grodansparadis/vscpl2drv-websocksrv
         submodules: 'recursive' 
 
-    - name: Checkout vscp repo
-      uses: actions/checkout@v4
-      with:
-        repository: grodansparadis/vscp
-        path: vscp
-        ref: development
-
     - name: Update before installing packages
       run: sudo ls /root && sudo apt-get update
 
@@ -35,6 +28,9 @@ jobs:
 
     - name: Install libssl-dev manually
       run: sudo apt-get install libssl-dev
+
+    - name: Install libsodium-dev manually
+      run: sudo apt-get install libsodium-dev
 
     - name: Install pandoc manually
       run: sudo apt-get install pandoc
