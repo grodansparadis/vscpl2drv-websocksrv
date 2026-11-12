@@ -513,14 +513,26 @@ public:
   std::string getWebRoot(void) const { return m_web_root; }
   void setWebRoot(const std::string &web_root) { m_web_root = web_root; }
 
-  std::string getCaPath(void) const { return m_ca_path; }
-  void setCaPath(const std::string &ca_path) { m_ca_path = ca_path; }
-  
-  std::string getCertPath(void) const { return m_cert_path; }
-  void setCertPath(const std::string &cert_path) { m_cert_path = cert_path; }
+  std::string getCaPath(void) const { return m_tls_ca_path; }
+  void setCaPath(const std::string &ca_path) { m_tls_ca_path = ca_path; }
 
-  std::string getKeyPath(void) const { return m_key_path; }
-  void setKeyPath(const std::string &key_path) { m_key_path = key_path; }
+  std::string getCertPath(void) const { return m_tls_certificate_path; }
+  void setCertPath(const std::string &cert_path) { m_tls_certificate_path = cert_path; }
+
+  std::string getKeyPath(void) const { return m_tls_private_key_path; }
+  void setKeyPath(const std::string &key_path) { m_tls_private_key_path = key_path; }
+
+  /*!
+      Read the TLS certificate, private key and (optional) CA files.
+      Mongoose takes them as PEM data, not as file names.
+      @return true if the certificate and key could be read.
+  */
+  bool loadTlsFiles(void);
+
+  /// PEM data read by loadTlsFiles()
+  const std::string &getTlsCertPem(void) const { return m_tls_cert_pem; }
+  const std::string &getTlsKeyPem(void) const { return m_tls_key_pem; }
+  const std::string &getTlsCaPem(void) const { return m_tls_ca_pem; }
 
   /*!
       @brief Init and start the websocket server
@@ -891,14 +903,10 @@ private:
   // Web root for the websocket server
   std::string m_web_root;
 
-  // TSL certificate path for the websocket server
-  std::string m_cert_path;
-
-  // TSL ca path for the websocket server
-  std::string m_ca_path;
-
-  // TSL key path for the websocket server
-  std::string m_key_path;
+  // TLS certificate, private key and CA as PEM data (see loadTlsFiles)
+  std::string m_tls_cert_pem;
+  std::string m_tls_key_pem;
+  std::string m_tls_ca_pem;
 
   // Encryption key
   uint8_t m_encryptionKey[16];
