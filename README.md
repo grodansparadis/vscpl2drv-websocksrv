@@ -40,3 +40,19 @@ The connection can be secured with TLS/SSL as well as a simple user authenticati
  * https://www.baeldung.com/linux/shell-read-websocket-response
  * Test with `wscat -c ws://localhost:8884/ws1` or `wscat -c ws://localhost:8884/ws2`
  * AES on-line encryption/decryption - https://emn178.github.io/online-tools/aes/encrypt/
+
+## License
+
+vscpl2drv-websocksrv is free software, licensed under the [GNU General Public License version 2](LICENSE) only (SPDX: `GPL-2.0-only`).
+
+The driver includes third-party code under its own licenses:
+
+| Component | License |
+| --------- | ------- |
+| [mongoose](https://github.com/cesanta/mongoose) | GPL-2.0-only, or a commercial license from Cesanta |
+| [VSCP helper code](https://github.com/grodansparadis/vscp) | MIT |
+| [nlohmann/json](https://github.com/nlohmann/json) | MIT |
+| [spdlog](https://github.com/gabime/spdlog) | MIT |
+| [mustache](https://github.com/kainjow/Mustache) | Boost Software License 1.0 |
+
+At run time the driver links OpenSSL and expat from the system.
