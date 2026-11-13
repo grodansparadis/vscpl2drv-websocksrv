@@ -61,8 +61,19 @@ jobs:
         make -j$(nproc)
         sudo cpack -G DEB 
         sudo make install DESTDIR=AppDir
+    - name: Write SHA256SUMS
+      id: sha256sums_64
+      continue-on-error: true
+      shell: bash
+      run: |
+        bash .github/scripts/write-sha256sums.sh "SHA256SUMS-${{ matrix.os }}_vscpl2drv-websocksrv_1.2.0.deb" <<'SHA256SUMS_PATTERNS'
+        /home/runner/work/vscpl2drv-websocksrv/vscpl2drv-websocksrv/build/vscpl2drv-websocksrv_1.2.0.deb
+        SHA256SUMS_PATTERNS
+
     - uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.os }}_vscpl2drv-websocksrv_1.2.0.deb
-        path: /home/runner/work/vscpl2drv-websocksrv/vscpl2drv-websocksrv/build/vscpl2drv-websocksrv_1.2.0.deb
+        path: |
+          /home/runner/work/vscpl2drv-websocksrv/vscpl2drv-websocksrv/build/vscpl2drv-websocksrv_1.2.0.deb
+          ${{ steps.sha256sums_64.outputs.file }}
         retention-days: 30

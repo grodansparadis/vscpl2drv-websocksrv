@@ -7,6 +7,8 @@ tagged, rename **Unreleased** to the version and date, and start a new
 
 ## Unreleased
 
+- Add scripts/download-artifacts.sh to download and verify the newest CI build artifacts
+- CI writes a SHA256SUMS-<artifact> checksum file into every uploaded build artifact
 - Fix TLS (wss://) for the websocket listener (01d53c0)
 - chore: bump version after push (0f0e23c)
 - Use GPL version 2 only in all source notices (aa41e07)
