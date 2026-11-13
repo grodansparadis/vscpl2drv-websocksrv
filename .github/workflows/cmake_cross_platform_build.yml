@@ -586,7 +586,7 @@ jobs:
       continue-on-error: true
       shell: bash
       run: |
-        bash .github/scripts/write-sha256sums.sh "SHA256SUMS-vscpl2drv-websocksrv-${{ needs.version.outputs.version_short }}-${{ matrix.os }}-${{ matrix.triplet }}" <<'SHA256SUMS_PATTERNS'
+        bash "${GITHUB_WORKSPACE//\\//}/.github/scripts/write-sha256sums.sh" "SHA256SUMS-vscpl2drv-websocksrv-${{ needs.version.outputs.version_short }}-${{ matrix.os }}-${{ matrix.triplet }}" <<'SHA256SUMS_PATTERNS'
         ${{github.workspace}}/build/**/*.so
         ${{github.workspace}}/build/**/*.dylib
         ${{github.workspace}}/build/**/*.dll
@@ -665,7 +665,7 @@ jobs:
       continue-on-error: true
       shell: bash
       run: |
-        bash .github/scripts/write-sha256sums.sh "SHA256SUMS-vscpl2drv-websocksrv-${{ needs.version.outputs.version_short }}-${{ matrix.name }}" <<'SHA256SUMS_PATTERNS'
+        bash "${GITHUB_WORKSPACE//\\//}/.github/scripts/write-sha256sums.sh" "SHA256SUMS-vscpl2drv-websocksrv-${{ needs.version.outputs.version_short }}-${{ matrix.name }}" <<'SHA256SUMS_PATTERNS'
         ${{ github.workspace }}/build-rpi/**/*.so
         ${{ github.workspace }}/build-rpi/**/*.dylib
         ${{ github.workspace }}/build-rpi/**/*.dll
