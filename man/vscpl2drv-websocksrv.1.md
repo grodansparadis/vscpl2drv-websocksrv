@@ -1,102 +1,511 @@
-% vscpl2drv-tcpipsrv(1) VSCP Level II tcp/ip server Driver
-% Åke Hedmann, the VSCP Project
-% October 30, 2025
+% VSCPL2DRV-WEBSOCKSRV(1) VSCP Level II driver
+% Åke Hedman, Grodans Paradis AB
+% November 2026
 
 # NAME
 
-vscpl2drv-websocksrv - VSCP Level II websocket server driver
+vscpl2drv-websocksrv - VSCP websocket (ws1/ws2) server
 
 # SYNOPSIS
 
-vscpl2drv-websocksrv
+**libvscpl2drv-websocksrv.so** (Linux), **vscpl2drv-websocksrv.dll** (Windows), **libvscpl2drv-websocksrv.dylib** (macOS)
+
+A VSCP Level II driver. It is loaded by the VSCP daemon (**vscpd**(8)), VSCP Works or any other program that uses the VSCP Level II driver API, and is configured with the JSON configuration file described below. The path of the configuration file is given to the driver when it is opened (**path-config** in the daemon's driver configuration).
 
 # DESCRIPTION
 
-The websocket driver is a level II driver and act as a websocket server for the [VSCP ws1 and ws2 websocket protocols](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket). Users or IoT/m2m devices with different privileges and rights can connect to the exported interface and send/receive VSCP events. Typically this is a web based HMI or IoT/m2m device that uses the VSCP protocol to communicate. This makes it very easy to display data from the VSCP network in a web browser widget or graphical control panel.
+The websocket driver is a level II driver and act as a websocket server for the VSCP ws1 and ws2 websocket protocols. Users or IoT/m2m devices with different privileges and rights can connect to the exported interface and send/receive VSCP events. Typically this is a web based HMI or IoT/m2m device that uses the VSCP protocol to communicate. This makes it very easy to display data from the VSCP network in a web browser widget or graphical control panel.
+
+It is also possible to serve static web content with the driver. This can be used to serve a simple web based HMI.
+
+* Documentation is available [here](https://grodansparadis.github.io/vscpl2drv-websocksrv)
+* Repository for the module is [here](https://github.com/grodansparadis/vscpl2drv-websocksrv)
 
 The VSCP ws1 and ws2 websocket protocols are described [here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket).
 
-With the simple interface the VSCP level II driver uses ([described here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_driver_interfaces)) it is also possible to use it with other software as a component. 
+The level II driver API is [described here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_driver_interfaces). With the simple interface API the VSCP level II driver uses (described above) it is also easy to use it with other software as a component.
 
-## Configuration
+The connection can be secured with TLS/SSL as well as a simple user authentication mechanism.
 
-The *configuration string* is the first configuration data that is read by the driver. The driver will, after it is read and parsed, ask the server for driver specific configuration data. This data is fetched with the same pattern for all drivers. Variables are formed by the driver name + some driver specific remote variable name. If this variable exist and contains data it will be used as configuration for the driver regardless of the content of the configuration string.
+# CONFIGURATION
 
-### Adding the driver to the VSCP daemon.
+On start up the configuration is read from the path set in the driver configuration of the VSCP daemon, usually */etc/vscp/conf-file-name* and values are set from this location. 
 
-Add the driver to the vscpd configuration file (default location */etc/vscp/vscpd.conf*). THis entry looks the same for all level II drivers.
+Normally you find the driver configuration file in one of these locations
 
-```xml
-<driver enable="true" >
-    <name>socketcan1</name>
-    <path>/usr/lib/vscpl2drv_tcpiplink.so</path>
-    <config>can</config>
-    <guid>FF:FF:FF:FF:FF:FF:FF:FE:B8:27:EB:0A:11:02:00:00</guid>
-</driver>
+| Platform | Standard configuration file path |
+| -------- | ----------------------- |
+| Linux    | /etc/vscpvscpl2drv-websocksrv.json    |
+| Windows  | C:\users\<user>\local\vscp\vscpvscpl2drv-websocksrv.json |
+| MacOS   | /etc/vscp/vscpvscpl2drv-websocksrv.json    |
+
+but you can put it wherever you want as long as the application using the driver has read access to it.
+
+If the **write** parameter is set to "true" the  application that use the driver **must** be able to write to it. If this feature is used the standard locations are not the best places to put the file as they often require elevated privileges to write to if placed there.
+
+The configuration file have the following format
+
+```json
+{
+    "debug" : true,
+    "write" : false,
+    "enable-ws1" : true,
+    "enable-ws2" : true,
+    "enable-rest" : true,
+    "enable-static" : false,
+    "url-ws1" : "/ws1",
+    "url-ws2" : "/ws2",
+    "url-rest" : "/rest",
+    "web-root" : "/tmp/www",
+    "key-file" : "/etc/vscp/vscp.key",
+    "interface" : "ws://localhost:8884",
+    "rx-filter" : "0,0,0,-,0,0,0,-",
+    "max-client-queue-size" : 32000,
+    
+    "path-users" : "/home/akhe/development/VSCP/vscpl2drv-websocksrv/debug/users.json",
+    "tls" : {
+      "ca" : "/etc/vscp/certs/ca.pem",
+      "cert" : "/etc/vscp/certs/cert.pem",
+      "key" : "/etc/vscp/certs/key.pem"
+    },
+    "logging" : {
+      "log-level" : "debug",
+      "file-enable-log": true,
+      "file-pattern" : "[vcpl2drv-websocksrv %c] [%^%l%$] %v",
+      "file-path" : "/tmp/vscpl2drv-websocksrv.log",
+      "file-max-size" : 5242880,
+      "file-max-files" : 7,
+      "console-enable-log": true,
+      "console-pattern" : "[vcpl2drv-websocksrv %c] [%^%l%$] %v"
+    }
+}
 ```
 
-* **name** is the name of the driver. Set a name that has some meaning for you.
-* **path** points to the location where the driver is installed.
-* **config** is the configuration string. This string contains configuration  entries separated by semicolon.
-* **guid** is the GUID that should be used to referee to this driver and devices handled by it. If you set a GUID (and you should) the two least significant digits should be set to zero. If absent or not set the VSCP daemon will set a GUID for you.
+A default configuration file is written to /usr/share/vscp/drivers/level2/vscpl2drv-websocksrv when the driver is installed. The repository contains a sample configuration file that can be used as a starting point [here](https://github.com/grodansparadis/vscpl2drv-websocksrv/blob/main/debug/conf_standard.json).
 
-In the configuration example above the driver will fetch configuration data from the server from variables *socketcan1_interface*, *socketcan1_filter* and  *socketcan1_mask*
+## debug
+Set debug to _true_ to get extra debug information written to the log file. This can be a valuable help if things does not behave as expected. This is only for extra debug information. Normal error and info messages are always logged according to the logging settings.
 
-### Configuration string
+## write (currently not used)
+If write is true dynamic changes to the configuration file will be possible to save dynamically to disk. That is, settings you do at runtime can be saved and be persistent. The safest place for a configuration file is in the VSCP configuration folder */etc/vscp/* but for dynamic saves are not allowed if you don't run the VSCP daemon as root (which you should not). Next best place is to use the folder */var/lib/vscp/drivers/level2/configure.json*. 
+
+If you never intend to change driver parameters during runtime consider moving the configuration file to the VSCP daemon configuration folder is a good choice.
+
+## enable-ws1
+Set to true to enable VSCP webSocket ws1 interface support.
+
+## enable-ws2
+Set to true to enable VSCP webSocket ws2 interface support.
+
+## enable-static
+Set to true to enable static web content serving. `web-root` holds the path to the folder with the static content.
+
+## url-ws1
+The URL part of the VSCP webSocket ws1 interface. Default is `/ws1`
+
+## url-ws2
+The URL part of the VSCP webSocket ws2 interface. Default is `/ws2`
+
+## web-root
+Path to the folder with static web content to be served if `enable-static` is set to true.  
+
+## key-file
+Path to the shared AES key used to encrypt the WebSocket authentication
+credentials. This is separate from the TLS private key and the users' Argon2id
+password hashes. The client and server must use the same AES key.
+
+The file must contain at least 32 hexadecimal characters (16 bytes), optionally
+followed by a newline. Generate a key with:
 
 ```bash
-interface
-```
+openssl rand -hex 16 > /etc/vscp/vscp.key
+``` 
 
-#### Interface
+Only the first 16 bytes are used for AES-128 authentication; extra key bytes do
+not increase its encryption strength. An unreadable or invalid configured key
+file prevents startup.
 
-The parameter interface is the socketcan interface to use. Typically this is can0, can0, can1... Defaults is vcan0, the first virtual interface. If the remote variable **prefix**_interface is available it will be used instead of the configuration value. "**prefix**" is the name given to the driver in *vscpd.conf*
+If `key-file` is omitted, the server uses
+`2DBB079A38985AF00EBEEFE22F9FFA0E`, matching the sample clients. This public
+default is for local testing only. Configure a private key and use TLS for
+deployment. A key mismatch can cause login to fail even with a correct username
+and password.
 
-### Remote variables
+## interface
+Set the interface to listen on. Default is: *ws://localhost:8884*. The interface is either secure using prefix `wss` (TLS) or insecure using prefix `ws`. It is not possible to define interfaces that accept connections of both types.
 
-The following configuration remote variables are defined
+if "ws:// part is omitted the content is treated as it was present.
 
-| Remote variable name | Type   | Description |
- | ------------- | ----   | -----------   |
- | **_interface**    | string | The socketcan interface to use. Typically this is “can0, can0, can1...” Defaults is vcan0 the first virtual interface. |
- | **_filter**       | string | Standard VSCP filter on string form. Used to filter what events that is received from the socketcan interface. If not give all events are received. |
- | **_mask**         | string | Standard VSCP mask in string form.  Used to filter what events that is received from the socketcan interface. If not give all events are received.   |
- | **config** | json | All of the above as a JSON object. |
+If port is omitted, default 8884 is used.
 
-#### Filter string form
-1,0x0000,0x0006,ff:ff:ff:ff:ff:ff:ff:01:00:00:00:00:00:00:00:00 as priority,class,type,GUID
+## path-users
+The user database is separated from the configuration file for security reasons and should be stored in a folder that is only readable by the user of the host software.
 
-#### Mask string form
-1,0x0000,0x0006,ff:ff:ff:ff:ff:ff:ff:01:00:00:00:00:00:00:00:00 as priority,class,type,GUID
+The format for the user file is specified below.
+
+## max-client-queue-size
+Maximum number of events in the client send queue. If the queue is full new events for the client are dropped.
+
+## rx-filter
+Set a default filter/mask for incoming events. The format is `priority,vscpclass,vscptype,GUID;priority-mask,vscpclass-mask,vscptype-mask,GUID-mask` where each field in the filter part (before the ';') can be a specific value. Values in the mask tells which bits in the filter that should be checked. A bit set to zero means "ignore". All bits set to one means "the value must be the same as in the first part". As an example the filter/mask
+
+> 0,10,6,00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:01;0,255,255,00:00:00:00:00:00:00:00:00:00:00:00:00:FF
+
+means that all events with class 10 and type 6 and any GUID with last byte set to 1 will pass the filter.
+
+All values can be give in decimal or hexadecimal (preceded number with '0x'). GUID is always given in hexadecimal (without preceded '0x').
+
+## TLS/SSL
+Settings for TLS (Transport Layer Security), SSL.  
+
+When `interface` uses `ws://`, the connection is not encrypted: network
+observers can read authentication traffic and VSCP events. Use `wss://` with a
+trusted server certificate whenever the connection crosses an untrusted
+network. See the security considerations and the
+self-signed certificate guide.
+
+### Certificates overview
+
+Transport Layer Security (TLS), and its predecessor, Secure Sockets Layer (SSL), are cryptographic protocols that provide communications security over a computer network.
+
+TLS provides two major benefits:
+
+`traffic encryption`, which makes it impossible to sniff and look inside the traffic, 
+
+and
+
+`authentication`, which makes it possible to one side of the TLS connection to verify the identity of the other side.
+
+Here we're talking about authentication. Authentication is implemented via certificates. A certificate has two parts - public and private. Talking in practical terms, three files are required to implement TLS authentication:
+
+`TLS certificate`: This is a "public" part. For example, a TLS-enabled server sends it to the client during the TLS handshake
+
+`TLS private key`: This is a "private" part
+
+`TLS Certificate Authority (CA) file`: This is used for verification of the "public" certificate sent by the server.
+
+The private key must be kept secret. The certificate and the CA file can be shared freely.
+
+Normally you set the certificate and the private key on the server side. The CA file is used on the client side to verify the server certificate.
+
+TLS certificates can be obtained from services like [Let's Encrypt](https://letsencrypt.org/). The other possibility is self-signed certificates, which are mainly used for development. You have a guid here to create self-signed certificates using OpenSSL [here](https://www.baeldung.com/openssl-self-signed-cert).
+
+Normally, when a client makes a connection to a TLS-enabled server, the server sends its certificate to the client and the client verifies it using its own CA (Certificate Authority) file. This way the client authenticates the server.
+
+In the most common situation, the client verifies the server, but the server does not verify the client. For example, browsers (clients) use a big CA file (or many CA files) to verify HTTPS servers.
+
+Clients can also provide certificates during the TLS handshake, and the server can verify it using a CA file. When both client and server use certificates, and verify the other side using a CA file, it is called `two-way TLS`. In order to implement two-way TLS, now both client and server must have their own cert, key and ca specified.
+
+So for two-way TLS both sides must have three files - cert, key and ca.
+
+#### Server
+  * ca.pem - file with trusted CA certificates to verify client certificates
+  * server_cert.pem - server TLS certificate
+  * server_key.pem - server TLS private key
+
+#### Client
+  * ca.pem - file with trusted CA certificates to verify server certificates
+  * client_cert.pem - client TLS certificate (only for two-way TLS)
+  * client_key.pem - client TLS private key (only for two-way TLS)  
+
+#### ca
+Path to a file containing trusted CA certificates for peers. Each file  must contain a single CA certificate. The file must be in PEM format. If this option is set, then the webserver requests a certificate from clients that connect and verifies that the certificate is signed by one of the CAs in the file.
+
+#### cert
+Path to the server certificate file, in PEM format. Required when `interface` uses `wss://`. The certificate, the private key and the CA file (if set) are read when the driver starts; if one of them can not be read the driver does not start. (`certificate` is accepted as an older name for this setting.)
+
+#### key
+Path to the server private key file, in PEM format. Required when `interface` uses `wss://`. This is **NOT** the key file used to authenticate the server to clients. That key is set in the _key-file_ parameter above.
+
+## Logging
+In this section is the log console and log file settings. Before the configuration file is read logging will be sent to the console. 
+
+Modes for logging can be set as of below. In debug/trace mode the debug flag above defines how much info is logged.
+
+### log-level
+Log level for log. Default is "info".
+
+| Level | Description |
+| ----- | ----------- |
+| "trace" | Everything is logged |
+| "debug" | Everything except trace is logged |
+| "info" | info and above is logged |
+| "err" | Errors and above is logged |
+| "critical" | Only critical messages are logged |
+| "off" | No logging |
+
+### Logging to console
+
+#### console-enable-log
+Enable logging to a console by setting to *true*.
+
+#### console-pattern
+
+Format for consol log.
+
+### Logging to file
+
+#### file-enable
+Enable logging to a file by setting to _true_.
+
+#### file-log-level 
+Log level for file log. Default is _"info"_.
+
+| Level | Description |
+| ----- | ----------- |
+| "trace" | Everything is logged |
+| "debug" | Everything except trace is logged |
+| "info" | info and above is logged |
+| "err" | Errors and above is logged |
+| "critical" | Only critical messages are logged |
+| "off" | No logging |
+
+#### file-pattern
+Log file pattern as described [here](https://github.com/gabime/spdlog/wiki/3.-Custom-formatting).
+
+#### file-path
+Set a writable path to a file that will get log information written to that file. This can be a valuable help if things does not behave as expected.
+
+#### file-max-size
+Max size for log file. It will be rotated if over this size. Default is 5 Mb.
+
+#### file-max-files
+Maximum number of log files to keep. Default is 7.
+
+## filter
+Filter and mask is a way to select which events is received by the driver. A filter have the following format
+
+> priority,vscpclass,vscptype,guid
+
+All values can be give in decimal or hexadecimal (preceded number with '0x'). GUID is always given i hexadecimal (without preceded '0x').
+
+**Default**: setting is
+
+> 0,0,0,00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00
+
+Read the [vscpd manual](http://grodansparadis.github.io/vscp/#/) for more information about how filter/masks work.
+
+The default filter/mask pair means that all events are received by the driver.
+
+## mask
+Filter and mask is a way to select which events is received by the driver. A mask have the following format
+
+> priority,vscpclass,vscptype,guid
+
+All values can be give in decimal or hexadecimal (preceded number with '0x'). GUID is always given i hexadecimal (without preceded '0x').
+
+The mask have a binary one ('1') in the but position of the filter that should have a specific value and zero ('0') for a don't care bit.
+
+Default setting is
+
+> 0,0,0,00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00
+
+Read the vscpd manual for more information about how filter/masks work.
+
+The default filter/mask pair means that all events are received by the driver.
+
+## Format for the user database
+
+The user database is a JSON file separate from the driver configuration. Store
+it in a location readable only by the account running the driver, such as
+`/etc/vscp/users.json`. See the user file format below for
+the schema and example.
 
 ---
 
-There are many Level I/II/III drivers available in VSCP & Friends framework that can be used with both VSCP Works and the VSCP Daemon and added to that Level II and Level III drivers that can be used with the VSCP Daemon.
+## User file format
 
-Level I drivers is documented [here](https://grodansparadis.gitbooks.io/the-vscp-daemon/level_i_drivers.html).
+The file named by `path-users` must be a JSON object containing a `users` array.
+Each entry requires a non-empty `name` and `password`. The password value must
+be an Argon2id password hash; do not store a plaintext password. The other
+fields are optional:
 
-Level II drivers is documented [here](https://grodansparadis.gitbooks.io/the-vscp-daemon/level_ii_drivers.html)
+* `fullname` and `note` are strings.
+* `rights` is an array of right names, or a string with names separated by
+  `/`. Names include `admin`, `user`, `driver`, `send-events`, and
+  `receive-events`.
+* `remotes` is a string or an array of remote address rules. Prefix each rule
+  with `+` to allow or `-` to deny.
+* `events` is a string or an array of allowed event class/type pairs, such as
+  `10:*` or `30:9`. An empty value leaves the event list unrestricted.
+* `filter` and `mask` are VSCP filter and mask strings.
 
-Level III drivers is documented [here](https://grodansparadis.gitbooks.io/the-vscp-daemon/level_iii_drivers.html)
+`remotes` and `events` may use either a JSON array of strings or a
+comma-delimited string.
+
+```json
+{
+  "users" : [
+    {
+      "name" : "admin",
+      "password" : "$argon2id$v=19$m=65536,t=2,p=1$<salt>$<hash>",
+      "fullname" : "Administrator",
+      "rights" : "admin",
+      "remotes" : [
+        "+127.0.0.0/24",
+        "+192.168.0.0/16"
+      ],
+      "events" : "",
+      "filter" : "",
+      "mask" : "",
+      "note" : "Administrative account"
+    },
+    {
+      "name" : "user",
+      "password" : "$argon2id$v=19$m=65536,t=2,p=1$<salt>$<hash>",
+      "fullname" : "Sample User",
+      "rights" : ["user", "send-events"],
+      "remotes" : [],
+      "events" : ["10:*", "30:9"],
+      "filter" : "",
+      "mask" : "",
+      "note" : "Sample account"
+    }
+  ]
+}
+```
+
+Replace each password placeholder with a valid Argon2id hash before using the
+file. Keep the file readable only by the account running the driver.
+
+## Windows
+See information from Linux. The only difference is the disk location from where configuration data is fetched.
+
+## VSCP daemon driver config
+
+To use the libvscpl2drv-websocksrv.so driver with the VSCP daemon there must be an entry in the level2 driver section of its configuration file. The location for the file is different for different platforms as in this table
+
+| Platform | Standard configuration file path |
+| -------- | ----------------------- |
+| Linux    | /etc/vscp/vscpd.json    |
+| Windows  | C:\users\<user>\local\vscp\vscpd.json |
+| MacOS   | /etc/vscp/vscpd.json    |
+
+The entry in the level2 driver section should look like this
+
+```json
+"drivers": {
+    "level2": [
+```
+
+The format is
+
+```json
+{
+  "enable" : true,
+  "name" : "websocket-srv",
+  "path-driver" : "/var/lib/vscp/drivers/level2/libvscpl2drv-websocksrv.so",
+  "path-config" : "/etc/vscp/websocksrv.json",
+  "guid" : "FF:FF:FF:FF:FF:FF:FF:F5:02:88:88:00:00:00:00:01",
+
+  "mqtt": {
+    "bind": "",
+    "host": "test.mqtt.org",
+    "port": 1883,
+    "mqtt-options": {
+      "tcp-nodelay": true,
+      "protocol-version": 311,
+      "receive-maximum": 20,
+      "send-maximum": 20,
+      "ssl-ctx-with-defaults": 0,
+      "tls-ocsp-required": 0,
+      "tls-use-os-certs": 0
+    },
+    "user": "vscp",
+    "password": "secret",
+    "clientid": "the-vscp-daemon websocksrv driver",
+    "publish-format": "json",
+    "subscribe-format": "auto",
+    "qos": 1,
+    "bcleansession": false,
+    "bretain": false,
+    "keepalive": 60,
+    "bjsonmeasurementblock": true,
+    "reconnect": {
+      "delay": 2,
+      "delay-max": 10,
+      "exponential-backoff": false
+    },
+    "tls": {
+      "cafile": "",
+      "capath": "",
+      "certfile": "",
+      "keyfile": "",
+      "pwkeyfile": "",
+      "no-hostname-checking": true,
+      "cert-reqs": 0,
+      "version": "",
+      "ciphers": "",
+      "psk": "",
+      "psk-identity": ""
+    },
+    "will": {
+      "topic": "vscp-daemon/{{srvguid}}/will",
+      "qos": 1,
+      "retain": true,
+      "payload": "VSCP Daemon is down"
+    },
+    "subscribe" : [
+      {
+        "topic": "vscp/websocksrv/{{guid}}/#",
+        "qos": 0,
+        "v5-options": 0,
+        "format": "auto"
+      }
+    ],
+    "publish" : [
+      {
+        "topic": "vscp/{{guid}}/{{class}}/{{type}}/{{nodeid}}",
+        "qos": 1,
+        "retain": false,
+        "format": "json"
+      }
+    ]
+  }
+}
+```
+### enable
+Set enable to "true" if the driver should be loaded by the VSCP daemon.
+
+### name
+This is the name of the driver. Used when referring to it in different interfaces.
+
+### path-driver
+This is the path to the driver. If you install from a Debian package this will be */var/lib/vscp/drivers/level2/libvscpl2drv-websocksrv.so*.
+
+### path-config
+This is the path to the driver configuration file (see below). This file determines the functionality of the driver. A good place for this file is in _/etc/vscp/websocksrv.json_ It should be readable only by the user the VSCP daemon is run under (normally _vscp_) as it holds credentials to log in to a remote VSCP websocket interface. Never make it writable at this location.
+
+### guid
+All level II drivers must have a unique GUID. There is many ways to obtain this GUID, Read more [here](https://grodansparadis.gitbooks.io/the-vscp-specification/vscp_globally_unique_identifiers.html). The tool [vscp_eth_to_guid](https://grodansparadis.github.io/vscp/#/configuring_the_vscp_daemon?id=think-before-guid) is a useful tool that is shipped with the VSCP daemon that will get you a unique GUID if you are working on a machine with an Ethernet interface.
+
+### mqtt
+See the [VSCP configuration documentation](https://grodansparadis.github.io/vscp/#/configuring_the_vscp_daemon?id=config-mqtt) for info about this section. It is common for all drivers loaded by the VSCP daemon.
+
+## VSCP Works driver config
+
+In VSCP Works you add the driver in the connection dialog in the level II driver section. You need to set the path to the driver and the path to the configuration file as above.
+
+Using the level II driver interface as a connection in this way make it possible to open both server and client connections to VSCP websocket interfaces (and others) for debugging and development.
+
+filename
+
+# FILES
+
+*/var/lib/vscp/drivers/level2/libvscpl2drv-websocksrv.so*
+:   The driver (Linux).
+
+*resources/linux/websocksrv.json*
+:   Sample configuration in the source repository (installed with the driver).
 
 # SEE ALSO
 
-`vscpd` (8).
-`uvscpd` (8).
-`vscpworks` (1).
-`vscpcmd` (1).
-`vscp-makepassword` (1).
-`vscphelperlib` (1).
+**vscpd**(8), **vscp-dump**(1), **vscp-send**(1), **vscpl2drv-socketcan**(1), **vscpl2drv-tcpipsrv**(1)
 
-The VSCP project homepage is here <https://www.vscp.org>.
+The source code and the full documentation: <https://github.com/grodansparadis/vscpl2drv-websocksrv>
 
-The [manual](https://grodansparadis.gitbooks.io/the-vscp-daemon) for vscpd contains full documentation. Other documentation can be found here <https://grodansparadis.gitbooks.io>.
-
-The vscpd source code may be downloaded from <https://github.com/grodansparadis/vscp>. Source code for other system components of VSCP & Friends are here <https://github.com/grodansparadis>
+The VSCP specification: <https://grodansparadis.github.io/vscp-doc-spec>
 
 # COPYRIGHT
-Copyright 2000-2021 Åke Hedman, the VSCP Project - MIT license.
 
-
-
-
+Copyright 2000-2026 Åke Hedman, Grodans Paradis AB. See the LICENSE file of the driver.
