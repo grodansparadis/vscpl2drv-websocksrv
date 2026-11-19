@@ -15,7 +15,7 @@ jobs:
 
     steps:
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         submodules: 'recursive'
 
@@ -70,7 +70,7 @@ jobs:
         /home/runner/work/vscpl2drv-websocksrv/vscpl2drv-websocksrv/build/vscpl2drv-websocksrv_1.2.0.deb
         SHA256SUMS_PATTERNS
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.os }}_vscpl2drv-websocksrv_1.2.0.deb
         path: |
