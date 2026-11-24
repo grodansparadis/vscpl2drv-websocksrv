@@ -26,6 +26,14 @@ It is also possible to serve static web content with the driver. This can be use
 * Documentation is available [here](https://grodansparadis.github.io/vscpl2drv-websocksrv)
 * Repository for the module is [here](https://github.com/grodansparadis/vscpl2drv-websocksrv)
 
+### Documentation deployment
+
+In **Settings → Pages → Build and deployment**, set **Source** to **GitHub Actions**
+to use the repository's Pages workflow instead of the generated branch deployment.
+The workflow publishes `docs/` unchanged on documentation updates to `main` and
+can also be run manually. It serializes deployments and allows 20 minutes for
+Pages queueing and updates, rather than the default 10-minute deployment timeout.
+
 The VSCP ws1 and ws2 websocket protocols are described [here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_websocket).
 
 The level II driver API is [described here](https://grodansparadis.github.io/vscp-doc-spec/#/./vscp_driver_interfaces). With the simple interface API the VSCP level II driver uses (described above) it is also easy to use it with other software as a component.
