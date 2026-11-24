@@ -189,11 +189,11 @@ So for two-way TLS both sides must have three files - cert, key and ca.
 Path to a file containing trusted CA certificates for peers. Each file  must contain a single CA certificate. The file must be in PEM format. If this option is set, then the webserver requests a certificate from clients that connect and verifies that the certificate is signed by one of the CAs in the file.
 
 #### cert
-Path to SSL certificate file. This option is only required when  the listening_ports is SSL The file must be in PEM format.
+Path to the server certificate file, in PEM format. Required when `interface` uses `wss://`. The certificate, the private key and the CA file (if set) are read when the driver starts; if one of them can not be read the driver does not start. (`certificate` is accepted as an older name for this setting.)
 
 
 #### key
-Path to SSL private key file. This option is only required when the listening_ports is SSL The file must be in PEM format. This is **NOT** the key file used to authenticate the server to clients. That key is set in the _key-file_ parameter above.
+Path to the server private key file, in PEM format. Required when `interface` uses `wss://`. This is **NOT** the key file used to authenticate the server to clients. That key is set in the _key-file_ parameter above.
 
 
 ## Logging

@@ -2,28 +2,22 @@
 //
 // This file is part of the VSCP (https://www.vscp.org)
 //
-// The MIT License (MIT)
-//
 // Copyright © 2000-2026 Ake Hedman, Grodans Paradis AB
 // <info@grodansparadis.com>
 //
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
+// This program is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License version 2 as
+// published by the Free Software Foundation.
 //
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
 //
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// You should have received a copy of the GNU General Public License
+// along with this program; if not, see <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: GPL-2.0-only
 //
 
 #ifdef __GNUG__
@@ -824,10 +818,24 @@ CWebSockSrv::doLoadConfig(std::string &path)
 
     json j = m_j_config["tls"];
 
-    // Certificate
-    if (j.contains("certificate")) {
+    // CA certificates used to verify client certificates (two-way TLS)
+    if (j.contains("ca")) {
       try {
-        m_tls_certificate_path = j["certificate"].get<std::string>();
+        m_tls_ca_path = j["ca"].get<std::string>();
+      }
+      catch (const std::exception &ex) {
+        spdlog::error("ReadConfig: Failed to read 'ca' Error='{}'", ex.what());
+      }
+      catch (...) {
+        spdlog::error("ReadConfig: Failed to read 'ca' due to unknown error.");
+      }
+    }
+
+    // Certificate ("cert", earlier versions read "certificate")
+    const char *certName = j.contains("cert") ? "cert" : "certificate";
+    if (j.contains(certName)) {
+      try {
+        m_tls_certificate_path = j[certName].get<std::string>();
       }
       catch (const std::exception &ex) {
         spdlog::error("ReadConfig: Failed to read 'certificate' Error='{}'", ex.what());
@@ -837,7 +845,7 @@ CWebSockSrv::doLoadConfig(std::string &path)
       }
     }
     else {
-      spdlog::debug("ReadConfig: Failed to read 'certificate' Defaults will be used.");
+      spdlog::debug("ReadConfig: Failed to read 'cert' Defaults will be used.");
     }
 
     // private key
@@ -1212,6 +1220,47 @@ CWebSockSrv::doSaveConfig(void)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// loadTlsFiles
+//
+
+bool
+CWebSockSrv::loadTlsFiles(void)
+{
+  auto readFile = [](const std::string &path, const char *what, std::string &pem) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in.is_open()) {
+      spdlog::error("TLS: Unable to open the {} file [{}].", what, path);
+      return false;
+    }
+    std::stringstream ss;
+    ss << in.rdbuf();
+    pem = ss.str();
+    if (in.bad() || pem.empty()) {
+      spdlog::error("TLS: Unable to read the {} file [{}].", what, path);
+      return false;
+    }
+    return true;
+  };
+
+  m_tls_ca_pem.clear();
+
+  if (!readFile(m_tls_certificate_path, "certificate", m_tls_cert_pem) ||
+      !readFile(m_tls_private_key_path, "private key", m_tls_key_pem)) {
+    return false;
+  }
+
+  // A CA file means clients must present a certificate signed by it
+  if (!m_tls_ca_path.empty()) {
+    if (!readFile(m_tls_ca_path, "CA", m_tls_ca_pem)) {
+      return false;
+    }
+    spdlog::info("TLS: Client certificates are required (two-way TLS).");
+  }
+
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // start
 //
 
@@ -1219,6 +1268,11 @@ int
 CWebSockSrv::start(void)
 {
   spdlog::debug("Controlobject: Starting WebSocket interface...");
+
+  if (mg_url_is_ssl(m_url.c_str()) && !loadTlsFiles()) {
+    spdlog::error("Controlobject: Unable to start the TLS listener on {}.", m_url);
+    return VSCP_ERROR_ERROR;
+  }
 
   m_bQuit = false;
 
@@ -3872,9 +3926,15 @@ websocksrv_event_handler(struct mg_connection *conn, int mgev, void *ev_data)
   }
   else if (conn->is_tls && (mgev == MG_EV_ACCEPT)) {
     spdlog::debug("WebSockSrv accepted connection.");
-    if (mg_url_is_ssl(pWebSockSrv->m_j_config["interface"].get<std::string>().c_str())) {
-      struct mg_tls_opts opts = { .cert = mg_unpacked(pWebSockSrv->getCertPath().c_str()),
-                                  .key  = mg_unpacked(pWebSockSrv->getKeyPath().c_str()) };
+    if (mg_url_is_ssl(pWebSockSrv->getUrl().c_str())) {
+      // Certificate, key and CA are PEM data loaded at start
+      struct mg_tls_opts opts;
+      memset(&opts, 0, sizeof(opts));
+      opts.cert = mg_str_n(pWebSockSrv->getTlsCertPem().data(), pWebSockSrv->getTlsCertPem().size());
+      opts.key  = mg_str_n(pWebSockSrv->getTlsKeyPem().data(), pWebSockSrv->getTlsKeyPem().size());
+      if (!pWebSockSrv->getTlsCaPem().empty()) {
+        opts.ca = mg_str_n(pWebSockSrv->getTlsCaPem().data(), pWebSockSrv->getTlsCaPem().size());
+      }
       mg_tls_init(conn, &opts);
     }
     else {
@@ -4086,7 +4146,9 @@ websockWorkerThread(void *pData)
   spdlog::info("Starting WS listener on `{0}`\n", pWebSockSrv->getUrl().c_str());
 
   // Create HTTP listener (websocket object is in conn->fn_data)
-  mg_http_listen(&mgr, pWebSockSrv->getUrl().c_str(), websocksrv_event_handler, pWebSockSrv);
+  if (NULL == mg_http_listen(&mgr, pWebSockSrv->getUrl().c_str(), websocksrv_event_handler, pWebSockSrv)) {
+    spdlog::error("Unable to listen on `{0}`", pWebSockSrv->getUrl().c_str());
+  }
 
   mg_wakeup_init(&mgr);
 

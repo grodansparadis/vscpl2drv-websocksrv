@@ -22,7 +22,7 @@ jobs:
       version_patch: ${{ steps.parse_version.outputs.version_patch }}
     steps:
     - name: Checkout main repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: grodansparadis/vscpl2drv-websocksrv
         ref: ${{ github.sha }}
@@ -97,7 +97,7 @@ jobs:
 
     steps:
     - name: Checkout main repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: grodansparadis/vscpl2drv-websocksrv
         ref: ${{ github.sha }}
@@ -116,7 +116,7 @@ jobs:
     # Setup Visual Studio environment properly for Windows
     - name: Setup MSBuild and Visual Studio (Windows)
       if: runner.os == 'Windows'
-      uses: microsoft/setup-msbuild@v1.3
+      uses: microsoft/setup-msbuild@v3
       with:
         msbuild-architecture: x64
 
@@ -581,8 +581,26 @@ jobs:
         ls -la *.dmg *.tar.gz *.tgz 2>/dev/null || echo "No packages generated"
 
     # Upload artifacts
+    - name: Write SHA256SUMS
+      id: sha256sums_585
+      continue-on-error: true
+      shell: bash
+      run: |
+        bash "${GITHUB_WORKSPACE//\\//}/.github/scripts/write-sha256sums.sh" "SHA256SUMS-vscpl2drv-websocksrv-${{ needs.version.outputs.version_short }}-${{ matrix.os }}-${{ matrix.triplet }}" <<'SHA256SUMS_PATTERNS'
+        ${{github.workspace}}/build/**/*.so
+        ${{github.workspace}}/build/**/*.dylib
+        ${{github.workspace}}/build/**/*.dll
+        ${{github.workspace}}/build/**/*.exe
+        ${{github.workspace}}/build/**/*.deb
+        ${{github.workspace}}/build/**/*.rpm
+        ${{github.workspace}}/build/**/*.tar.gz
+        ${{github.workspace}}/build/**/*.tgz
+        ${{github.workspace}}/build/**/*.dmg
+        ${{github.workspace}}/build/**/*.zip
+        SHA256SUMS_PATTERNS
+
     - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: vscpl2drv-websocksrv-${{ needs.version.outputs.version_short }}-${{ matrix.os }}-${{ matrix.triplet }}
         path: |
@@ -596,6 +614,7 @@ jobs:
           ${{github.workspace}}/build/**/*.tgz
           ${{github.workspace}}/build/**/*.dmg
           ${{github.workspace}}/build/**/*.zip
+          ${{ steps.sha256sums_585.outputs.file }}
         retention-days: 30
         if-no-files-found: error
 
@@ -614,10 +633,10 @@ jobs:
 
     steps:
     - name: Checkout source
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Enable ARM emulation
-      uses: docker/setup-qemu-action@v3
+      uses: docker/setup-qemu-action@v4
       with:
         platforms: arm,arm64
 
@@ -641,8 +660,20 @@ jobs:
             cmake --build build-rpi --config Release --parallel 2
           '
 
+    - name: Write SHA256SUMS
+      id: sha256sums_645
+      continue-on-error: true
+      shell: bash
+      run: |
+        bash "${GITHUB_WORKSPACE//\\//}/.github/scripts/write-sha256sums.sh" "SHA256SUMS-vscpl2drv-websocksrv-${{ needs.version.outputs.version_short }}-${{ matrix.name }}" <<'SHA256SUMS_PATTERNS'
+        ${{ github.workspace }}/build-rpi/**/*.so
+        ${{ github.workspace }}/build-rpi/**/*.dylib
+        ${{ github.workspace }}/build-rpi/**/*.dll
+        ${{ github.workspace }}/build-rpi/**/*.exe
+        SHA256SUMS_PATTERNS
+
     - name: Upload Raspberry Pi artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: vscpl2drv-websocksrv-${{ needs.version.outputs.version_short }}-${{ matrix.name }}
         path: |
@@ -650,6 +681,7 @@ jobs:
           ${{ github.workspace }}/build-rpi/**/*.dylib
           ${{ github.workspace }}/build-rpi/**/*.dll
           ${{ github.workspace }}/build-rpi/**/*.exe
+          ${{ steps.sha256sums_645.outputs.file }}
         retention-days: 30
         if-no-files-found: error
 
@@ -660,12 +692,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Download all artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: artifacts
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v3
       with:
         files: artifacts/**/*
         draft: false
